@@ -429,6 +429,51 @@ Parâmetros de fábrica: mínima `0,30 m/s`, máxima `5,20 m/s`, referência em
 55 % da faixa e contraste `1,15`. Para cada montagem, prefira o
 assistente acima.
 
+### A régua aprende sozinha — e é ela que resolve o "não passo de mil"
+
+O sintoma mais comum de uma máquina recém-montada é todo mundo tirar a
+mesma nota baixa. Quase nunca é o cliente batendo fraco: é a **régua**
+estar descrevendo a bancada em vez do gabinete.
+
+A faixa de fábrica vai de `0,30` a `5,20 m/s` porque foi assim que a
+bancada mediu. Dependendo de onde a palheta foi parafusada, de quanto o
+braço cede e da largura real da fenda, a mesma montagem entrega no máximo
+`1,2 m/s` — e aí a máquina inteira vive no primeiro quinto da escala:
+
+| velocidade | com a régua de fábrica | com a régua aprendida |
+| --- | --- | --- |
+| 0,6 m/s | 246 | 1525 |
+| 1,0 m/s | 782 | 5550 |
+| 1,2 m/s | 1105 | 7739 |
+
+Mesmo sensor, mesmo soco, mesma curva. Só a régua mudou.
+
+Com o **aprendizado ligado** (padrão), a máquina guarda a velocidade de
+cada soco aceito e move as três âncoras, um passo por rodada, para os
+percentis do que ela de fato mede: a mediana vira o soco de referência.
+Isso quer dizer que **metade do salão fica acima de 5000 e metade abaixo,
+em qualquer gabinete**, sem ninguém configurar nada.
+
+Quatro travas impedem que aprender sozinha vire um problema: nada
+acontece com menos de 12 socos na memória; cada ajuste anda no máximo 12 %
+da distância até o alvo (uma criança batendo dez vezes não derruba a
+régua); a janela é de 240 socos; e o resultado passa pelo mesmo
+saneamento de qualquer outro ajuste. Na Central dá para **desligar** o
+aprendizado e congelar a régua, ou **apagar a memória** e recomeçar.
+
+### Regular com um soco e um toque
+
+Na Central → GOLPE, a leitura ao vivo mostra o último soco em **m/s**, a
+nota que ele pagou e **onde ele caiu dentro da régua**. Quando todo mundo
+tira mil pontos, a barra fica colada na esquerda — e aí a resposta deixa
+de ser "o pessoal bate fraco".
+
+Abaixo dela, três botões: **É O MÍNIMO**, **É O SOCO MÉDIO**, **É O
+MÁXIMO**. Bata uma vez e toque no que aquele soco deve valer; a régua se
+ajusta na hora e vai para o firmware junto. É o caminho para usar com a
+fila esperando — o assistente de dez golpes continua sendo o jeito certo
+de calibrar do zero.
+
 ### Nunca regule o pulso mínimo à mão
 
 Ele não tem mais `−` e `+`, e isso é proposital. A palheta atravessa a

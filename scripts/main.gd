@@ -101,8 +101,8 @@ const PASSOS := {
 	# da régua que ela é.
 	"referencia": Rect2(110, 526, 400, 58),
 	"curva": Rect2(570, 526, 400, 58),
-	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
+	"porta": Rect2(110, 1424, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1538, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
@@ -115,10 +115,21 @@ const BOTOES_SIMPLES := {
 	"mapear_start": Rect2(110, 620, 400, 68),
 	"mapear_credito": Rect2(570, 620, 400, 68),
 	# --- página GOLPE
-	"eixo": Rect2(620, 1010, 280, LADO_BOTAO),
-	"enviar_config": Rect2(110, 1300, 400, 60),
-	"testar": Rect2(570, 1300, 400, 60),
-	"calibrar": Rect2(300, 846, 480, 56),
+	# OS TRÊS BOTÕES QUE REGULAM A MÁQUINA EM UM SOCO.
+	#
+	# O assistente pede dez golpes e quatro passos. Ele continua sendo o
+	# jeito certo de calibrar do zero, mas não é o que se quer com a fila
+	# esperando e a máquina pagando mil pontos para todo mundo: aí se quer
+	# bater UMA vez e dizer "este é o máximo". É isso, e é imediato.
+	"usar_min": Rect2(110, 672, 275, 56),
+	"usar_ref": Rect2(402, 672, 276, 56),
+	"usar_max": Rect2(695, 672, 275, 56),
+	"auto_escala": Rect2(110, 842, 400, 60),
+	"esquecer_escala": Rect2(570, 842, 400, 60),
+	"calibrar": Rect2(300, 1258, 480, 56),
+	"eixo": Rect2(620, 1424, 280, LADO_BOTAO),
+	"enviar_config": Rect2(110, 1730, 400, 56),
+	"testar": Rect2(570, 1730, 400, 56),
 	# --- página CÂMERA
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
@@ -150,6 +161,8 @@ const PAGINA_DO_CONTROLE := {
 	"fechar": -1, "padroes": -1, "salvar": -1,
 	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0,
 	"vmin": 1, "vmax": 1, "referencia": 1, "curva": 1,
+	"usar_min": 1, "usar_ref": 1, "usar_max": 1, "auto_escala": 1,
+	"esquecer_escala": 1,
 	"porta": 1, "eixo": 1, "raio": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
@@ -192,6 +205,14 @@ var score_ref_speed := ScoreCurve.REFERENCIA_AUTOMATICA
 ## delas: um soco de referência paga 5000 com qualquer contraste.
 var score_contraste := ScoreCurve.DEFAULT_CONTRASTE
 var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
+## A RÉGUA QUE A MÁQUINA APRENDE SOZINHA. Ver `AutoEscala` — é a resposta
+## ao "não consigo passar de mil", e a razão de a faixa de fábrica ter
+## deixado de ser um palpite que precisa estar certo.
+var auto_escala := AutoEscala.new()
+## A última velocidade aceita, em m/s. Fica à vista na Central: sem ela,
+## quem opera não tem como saber se o problema é o soco ou a régua.
+var ultima_velocidade := 0.0
+var ultima_nota := 0
 ## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,pulso_ms).
 var sensor_eixo := "A"
 var sensor_raio := 0.020
@@ -1178,7 +1199,30 @@ func _fechar_rodada() -> void:
 		GameDef.faixa_de(result_score),
 		posicao_no_ranking > 0
 	)
+	_aprender_a_regua()
 	_salvar()
+
+## A RÉGUA ANDA UM PASSO EM DIREÇÃO AO QUE ESTA MÁQUINA REALMENTE MEDE.
+##
+## Uma vez por rodada, e nunca no meio dela: os dois socos de uma mesma
+## rodada precisam ser medidos pela mesma régua, ou a pessoa vê dois
+## números que não dá para comparar e a máquina perde a razão de existir.
+##
+## O passo é pequeno de propósito (ver `AutoEscala`). Não é para a régua
+## reagir à rodada que acabou: é para ela, ao longo de algumas dezenas de
+## socos, parar de descrever a bancada e passar a descrever o gabinete.
+func _aprender_a_regua() -> void:
+	var novo := auto_escala.passo(hit_min_speed, _referencia_efetiva(), hit_max_speed)
+	if novo.is_empty():
+		return
+	hit_min_speed = float(novo["vmin"])
+	hit_max_speed = float(novo["vmax"])
+	score_ref_speed = float(novo["vref"])
+	_aplicar_faixas()
+	# O firmware também precisa saber: é ele que descarta abaixo de
+	# `vmin` e que enche a coluna de LED até `vmax`. Uma régua nova no
+	# jogo com a antiga na placa é a discordância clássica.
+	_enviar_config()
 
 ## O RESULTADO É DE CADA SOCO, e não só do fim da rodada.
 ##
@@ -1252,7 +1296,14 @@ func _processar_resultado(delta: float) -> void:
 	# arcade precisa ter. O veredito só entra quando a contagem termina.
 	# Curva cúbica: ganha velocidade de imediato e assenta suavemente no
 	# valor exato. O jogador vê resposta rápida sem perder a leitura final.
-	var suave := 1.0 - pow(1.0 - avanco, 3.0)
+	# A CURVA DO NÚMERO É MAIS DIANTEIRA DO QUE ERA.
+	#
+	# Era cúbica (`1 - (1-t)³`), que gasta a segunda metade do tempo
+	# andando os últimos dez por cento — legível, mas é ali que nasce a
+	# sensação de "ele está demorando para parar". Na quarta potência o
+	# número dispara, chega perto do valor quase imediatamente e só
+	# assenta os últimos dígitos; a leitura é a mesma e a espera some.
+	var suave := 1.0 - pow(1.0 - avanco, 4.0)
 	displayed_score = float(result_score) * suave
 
 	sons.score_progress(avanco)
@@ -3007,6 +3058,11 @@ func _receber_hit(msg: Dictionary) -> void:
 	# nunca um segundo filtro deste lado.
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
+	# O SOCO ENTRA NA MEMÓRIA DA RÉGUA ANTES DE VIRAR NOTA, mas a régua
+	# só é recalculada no fim da rodada. Um soco nunca muda a régua que
+	# ele mesmo está usando — senão dois socos iguais na mesma rodada
+	# pagariam diferente, e é impossível explicar isso a quem jogou.
+	auto_escala.registrar(speed)
 	_processar_golpe(speed, false, pico, duracao)
 
 ## Sensor e teclado passam obrigatoriamente por esta única porta. Assim a
@@ -3018,6 +3074,8 @@ func _processar_golpe(
 		speed, hit_min_speed, hit_max_speed, score_contraste, score_dead_zone,
 		score_ref_speed
 	)
+	ultima_velocidade = speed
+	ultima_nota = pontos
 	if pontos <= 0:
 		_show_notice("MOVIMENTO ABAIXO DA ZONA DE PONTUAÇÃO")
 		return
@@ -3321,6 +3379,55 @@ func _click_central(p: Vector2) -> void:
 		ranking.clear()
 		_photo_cache.clear()
 		_show_notice("RANKING E FOTOS ZERADOS")
+	elif _tocou("usar_min", p) or _tocou("usar_ref", p) or _tocou("usar_max", p):
+		# REGULAR A MÁQUINA COM UM SOCO E UM TOQUE.
+		#
+		# O assistente pede dez golpes e quatro passos, e continua sendo o
+		# jeito certo de calibrar do zero. Mas quando a queixa é "todo
+		# mundo tira mil pontos", o conserto é de um número só: o teto
+		# está longe demais do que esta máquina mede. Bater uma vez e
+		# dizer "este é o máximo" resolve na hora, com a fila esperando.
+		if ultima_velocidade <= 0.0:
+			_show_notice("BATA UMA VEZ PRIMEIRO — OU USE TESTAR SENSOR")
+			return
+		if _tocou("usar_min", p):
+			hit_min_speed = ultima_velocidade
+			_show_notice("MÍNIMO = %.2f m/s" % ultima_velocidade)
+		elif _tocou("usar_ref", p):
+			score_ref_speed = ultima_velocidade
+			_show_notice("SOCO MÉDIO = %.2f m/s  •  vale %d pontos" % [
+				ultima_velocidade, ScoreCurve.PONTOS_DE_REFERENCIA
+			])
+		else:
+			# O TETO FICA UM POUCO ACIMA DO SOCO DADO, e não em cima dele.
+			# Com o teto exatamente no soco, quem acabou de bater tiraria
+			# 9999 — e um teto que a primeira pessoa encosta deixa de ser
+			# teto. Doze por cento é o bastante para 9999 continuar sendo
+			# conquistado por quem bate melhor do que este soco.
+			hit_max_speed = ultima_velocidade * 1.12
+			_show_notice("MÁXIMO = %.2f m/s  •  este soco vale quase 9999" % hit_max_speed)
+		# Mexer à mão manda na máquina: o aprendizado recomeça a partir
+		# do que acabou de ser dito, em vez de puxar de volta para a
+		# média antiga e desfazer o ajuste em algumas rodadas.
+		auto_escala.esquecer()
+		_aplicar_faixas()
+		_enviar_config()
+		# A nota do soco mostrado é recalculada na régua nova: sem isto a
+		# leitura ao lado continuaria mostrando o número velho, e quem
+		# regulou não veria o efeito do próprio toque.
+		ultima_nota = ScoreCurve.points_from_speed(
+			ultima_velocidade, hit_min_speed, hit_max_speed, score_contraste,
+			score_dead_zone, score_ref_speed
+		)
+	elif _tocou("auto_escala", p):
+		auto_escala.ligada = not auto_escala.ligada
+		_show_notice(
+			"APRENDIZADO LIGADO — A RÉGUA SE AJUSTA SOZINHA" if auto_escala.ligada
+			else "APRENDIZADO DESLIGADO — A RÉGUA FICA COMO ESTÁ"
+		)
+	elif _tocou("esquecer_escala", p):
+		auto_escala.esquecer()
+		_show_notice("MEMÓRIA DA RÉGUA APAGADA — APRENDENDO DO ZERO")
 	elif _tocou("teto_efeitos", p):
 		desempenho.teto = desempenho.proximo_teto()
 		desempenho.aplicar_teto()
@@ -3511,6 +3618,11 @@ func _carregar() -> void:
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
+		# A MEMÓRIA DA RÉGUA SOBREVIVE AO DESLIGAR. Sem isto a máquina
+		# reaprenderia do zero toda manhã, e a primeira meia hora de cada
+		# dia teria a escala errada — justamente o horário em que menos
+		# gente está olhando para consertar.
+		auto_escala.carregar(data.get("auto_escala", {}))
 		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 		# O PULSO MÍNIMO NÃO É LIDO DO DISCO, e isto é de propósito.
 		#
@@ -3569,6 +3681,7 @@ func _salvar() -> void:
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
 		"sensor_pulso_ms": sensor_pulso_ms,
+		"auto_escala": auto_escala.para_salvar(),
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
@@ -4483,6 +4596,40 @@ func _cor_da_posicao(posicao: int) -> Color:
 ## para a tela, a tabela ainda chega, a linha ainda cai e bate —, mas
 ## nenhum deles espera por si mesmo. A comemoração que vem depois
 ## (confete, torcida) não encolheu: essa a pessoa quer que dure.
+## O LEIAUTE DA LISTA, num lugar só.
+##
+## Estavam espalhadas pelo desenho como números soltos — 430, 164, 380,
+## 1150 —, e mexer em qualquer uma exigia caçar as outras. Uma linha mais
+## alta sem o recorte acompanhando é a linha escapando para cima do
+## título, que foi um defeito real desta tela.
+const LINHA_ALTURA := 126.0
+const LISTA_TOPO := 336.0
+## Quantas linhas inteiras cabem na janela. Sai do recorte, e não de um
+## número anotado à parte que envelhece quando alguém mexe na altura.
+const LINHAS_VISIVEIS := 8
+## SÓ LINHA INTEIRA APARECE.
+##
+## O recorte deixava passar uma linha que começasse até uma altura ACIMA
+## do topo, na ideia de mostrar a lista "cortada" na borda. Sem um
+## recorte de verdade no desenho, o que acontecia era outra coisa: com a
+## lista rolada, o primeiro cartão subia por cima da faixa da colocação e
+## do fio do título, e escondia justamente o aviso de que a pessoa tinha
+## entrado. Uma linha só entra quando cabe inteira.
+const LISTA_RECORTE_TOPO := 330.0
+## Sete linhas cheias. A oitava encostava no "SEU SOCO" do rodapé — e
+## texto por cima de cartão é o defeito mais visível que esta tela pode
+## ter, porque é a tela que sai fotografada no celular.
+const LISTA_RECORTE_BASE := 1350.0
+
+## A CASCATA. Quanto uma linha espera depois da anterior, e quanto dura a
+## entrada de cada uma.
+##
+## São números pequenos de propósito: 45 ms entre linhas e 180 ms de
+## entrada dão uma sequência que o olho lê como UMA montagem rápida, e
+## não como vinte animações. Mais lento do que isso vira desfile.
+const LINHA_CASCATA := 0.045
+const LINHA_ENTRADA := 0.18
+
 const ATO_ANUNCIO := 0.95
 const ATO_TABELA := 0.68
 const ATO_ASSENTA := 0.45
@@ -4500,87 +4647,175 @@ func _draw_ranking_reveal() -> void:
 		_ranking_anuncio(t / anuncio)
 		return
 
-	var chegada := clampf((t - anuncio) / ATO_TABELA, 0.0, 1.0)
-	var eased := chegada * chegada * (3.0 - 2.0 * chegada)
-	var assenta := clampf((t - anuncio - ATO_TABELA) / ATO_ASSENTA, 0.0, 1.0)
+	var tabela := t - anuncio
+	var assenta := clampf((tabela - ATO_TABELA) / ATO_ASSENTA, 0.0, 1.0)
 
-	_texto_arcade("TOP 20", 220.0, 110, Paleta.CIANO, LARGURA_UTIL)
 	var celebracao := RankingCelebration.para(posicao_no_ranking)
-	var titulo := str(celebracao.get("subtitulo", "%dº LUGAR • VOCÊ ENTROU!" % posicao_no_ranking)) if entrou else "TENTE SUPERAR ESSAS MARCAS"
-	_texto_cabendo(titulo, 312.0, 38, Paleta.AMBAR, LARGURA_UTIL)
+	_ranking_cabecalho(entrou, celebracao, tabela)
 
-	var position_index := maxi(posicao_no_ranking - 1, 0)
-	var target := clampi(position_index - 2, 0, 15)
-	var offset := float(target) * 164.0 * eased
-	# AS VINTE VAGAS, e não só as ocupadas. Numa máquina nova a lista tem
-	# uma linha e dezenove buracos; desenhando só o que existe, a tela
-	# vira um cartão solto num vazio preto. Desenhando a vaga aberta, o
-	# mesmo vazio passa a dizer "sobrou lugar para você".
+	# A JANELA DA LISTA. Ela é rolada para a vizinhança da linha
+	# conquistada — e já CHEGA rolada, sem animar a rolagem. Animar a
+	# lista inteira deslizando é meio segundo em que não dá para ler
+	# nada; é a linha da pessoa que precisa se mexer, não a tabela.
+	# O CAMPEÃO NÃO PODE SUMIR DA TELA À TOA.
+	#
+	# A rolagem punha a linha conquistada sempre na terceira posição
+	# visível — inclusive quando a pessoa tirou o 4º lugar, e aí a lista
+	# começava no 02 e o CAMPEÃO, que é a linha mais importante de uma
+	# tabela de recordes, ficava de fora sem necessidade nenhuma. Pondo a
+	# linha conquistada na QUINTA posição visível, todo mundo do 1º ao 5º
+	# lugar vê a tabela desde o topo, e só quem entrou mais fundo é que
+	# perde o começo — aí não tem jeito, a lista não cabe.
+	var foco := clampi(
+		posicao_no_ranking - 5, 0, maxi(RANKING_TAMANHO - LINHAS_VISIVEIS, 0)
+	)
+	var offset := float(foco) * LINHA_ALTURA
+
 	for i in range(RANKING_TAMANHO):
-		var y := 430.0 + float(i) * 164.0 - offset
-		var vazia := i >= ranking.size()
+		var y := LISTA_TOPO + float(i) * LINHA_ALTURA - offset
+		if y < LISTA_RECORTE_TOPO or y + LINHA_ALTURA > LISTA_RECORTE_BASE + LINHA_ALTURA:
+			continue
+		if y + LINHA_ALTURA - 18.0 > LISTA_RECORTE_BASE:
+			continue
 		var selected := posicao_no_ranking == i + 1
-		# A LINHA DE QUEM JOGOU CAI DE CIMA, mas de perto: 520 px a
-		# levavam para cima do cabeçalho, e a tabela ficava com o "03"
-		# flutuando acima do "01". Duzentos e sessenta é o bastante para
-		# a queda ser vista sem a linha sair da lista.
-		var descida := 0.0
-		if selected:
-			# UMA ALTURA DE LINHA, e não mais. A vaga dela já está aberta
-			# na lista — as outras linhas nunca ocuparam o lugar. Caindo
-			# de 260 px ela cruzava DUAS linhas no caminho, e cruzar
-			# linha lê como defeito de desenho, não como chegada. De 150
-			# ela desce da vizinhança do próprio lugar.
-			descida = (1.0 - _passo_com_batida(assenta)) * float(celebracao.get("queda", 150.0))
-			y -= descida
-		# O RECORTE VEM DEPOIS DA QUEDA, e não antes: era por conferir a
-		# altura antes de aplicar o deslocamento que a linha escapava da
-		# janela da lista e ia parar em cima do título.
-		if y < 380.0 or y > 1150.0:
-			continue
-		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
-		# AS LINHAS ENTRAM PELA ESQUERDA, nunca pela direita.
+		# A CASCATA: CADA LINHA TEM O SEU PRÓPRIO RELÓGIO.
 		#
-		# O deslocamento era positivo: cada linha começava até 200 px à
-		# direita do lugar dela e, como a largura não mudava, a linha
-		# inteira passava dos 1080 px da tela — a pontuação, que fica na
-		# ponta direita, ficava cortada durante toda a entrada. Negativo,
-		# a linha entra de fora da tela e assenta; nada some.
-		var shift := -(1.0 - eased) * (80.0 + float(i % 5) * 30.0)
-		if selected:
-			# Ela não entra pela esquerda com as outras: cai de cima e
-			# bate. É esse atraso que faz a tabela parecer ABRIR ESPAÇO
-			# para ela em vez de já vir pronta.
-			shift = 0.0
-		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
-		if vazia:
-			_cartao(card, Color("1c060c"), Color("4a1420"), 1.0, 1.5)
-			_texto("%02d" % (i + 1), y + 91.0, 45, Color("4a1420"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
-			_texto("VAGA ABERTA", y + 91.0, 30, Color("6d2835"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
+		# Antes as vinte compartilhavam um `eased` só, então a tabela
+		# inteira deslizava como um bloco — um movimento longo e mole. Com
+		# um atraso por posição e uma entrada curta para cada uma, elas
+		# batem no lugar em sequência, uma depois da outra, rápido. É a
+		# diferença entre uma tela que desliza e uma tela que MONTA.
+		var atraso := float(i - foco) * LINHA_CASCATA
+		var meu := clampf((tabela - atraso) / LINHA_ENTRADA, 0.0, 1.0)
+		if meu <= 0.0:
 			continue
-		if selected and assenta < 1.0:
-			# CHEGA APARECENDO, e não atravessando. Com opacidade cheia a
-			# linha passa por cima das vizinhas no caminho e o olho lê um
-			# cartão solto deslizando sobre a tabela; entrando de leve,
-			# ela se materializa no lugar dela.
-			var tinta := clampf(assenta * 1.8, 0.0, 1.0)
-			if tinta < 1.0:
-				_cartao(card, Color("b21029", tinta), Color(color, tinta), 1.0, 4.0)
-				_texto("%02d" % (i + 1), y + 91.0, 45, Color(color, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
-				_texto("VOCÊ", y + 64.0, 26, Color(color, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
-				_texto("%04d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Color(Paleta.TINTA, tinta), HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
-				continue
-			# No quadro em que ela assenta, um halo curto marca a batida.
-			for i2 in range(3):
-				var atras := card.grow(6.0 + float(i2) * 10.0)
-				_cartao(atras, Color(Paleta.AMBAR, 0.10 - float(i2) * 0.03), Color(Paleta.AMBAR, 0.0), 1.0, 6.0)
-		_cartao(card, Color("b21029") if selected else Color("300b16"), color, 1.0, 4.0 if selected else 1.5)
-		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
-		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
-		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
-		_texto("%04d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
-	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
-	_texto_arcade("%04d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
+		if selected:
+			# A linha de quem jogou não entra com as outras: ela espera a
+			# tabela montar e SÓ ENTÃO cai no lugar dela e bate. É esse
+			# atraso que faz a tabela parecer abrir espaço para ela.
+			_ranking_linha_do_jogador(i, y, assenta, celebracao)
+			continue
+		_ranking_linha(i, y, meu, false)
+
+	_ranking_rodape()
+
+## O cabeçalho da tabela: título, faixa da colocação e a régua de ouro.
+func _ranking_cabecalho(entrou: bool, celebracao: Dictionary, tabela: float) -> void:
+	var chegada := clampf(tabela / 0.22, 0.0, 1.0)
+	var alto := lerpf(-40.0, 0.0, _passo_com_batida(chegada))
+	_texto_arcade("TOP 20", 206.0 + alto, 104, Paleta.CIANO, LARGURA_UTIL)
+	# Um fio sob o título dá borda à tabela sem gastar uma moldura.
+	draw_rect(Rect2(MARGEM + 40.0, 236.0 + alto, LARGURA_UTIL - 80.0, 3.0), Color(Paleta.CIANO, 0.5))
+	if not entrou:
+		_texto_cabendo("TENTE SUPERAR ESSAS MARCAS", 296.0 + alto, 34, Paleta.TINTA_FRACA, LARGURA_UTIL)
+		return
+	# A FAIXA DA COLOCAÇÃO. Um retângulo na cor da classe, com a posição
+	# grande dentro: é o que a pessoa procura na tela quando chega aqui, e
+	# procurar dentro de uma lista de vinte linhas é trabalho demais.
+	var cor: Color = celebracao.get("cor", Paleta.AMBAR)
+	var faixa := Rect2(MARGEM + 150.0, 258.0 + alto, LARGURA_UTIL - 300.0, 56.0)
+	# Fundo ESCURO com a cor no fio e na letra. Tingir o fundo com a cor
+	# a 16% por cima de um cenário vermelho dava um rosa lavado que não
+	# lê de longe — e esta faixa existe justamente para ser lida de longe.
+	_placa(faixa, 12.0, Color("1a0509", 0.92))
+	draw_rect(faixa, Color(cor, 0.85), false, 2.0)
+	draw_rect(Rect2(faixa.position, Vector2(7.0, faixa.size.y)), cor)
+	_texto(
+		str(celebracao.get("subtitulo", "%dº LUGAR" % posicao_no_ranking)),
+		faixa.position.y + 38.0, 30, cor,
+		HORIZONTAL_ALIGNMENT_CENTER, faixa.position.x, faixa.size.x
+	)
+
+## UMA LINHA DA TABELA. `entrada` de 0 a 1 é a animação dela, e só dela.
+func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool) -> void:
+	var vazia := i >= ranking.size()
+	var posicao := i + 1
+	var cor := _cor_da_posicao(posicao)
+	var passo := _passo_com_batida(entrada)
+	# Entra pela esquerda e assenta. Nunca pela direita: a pontuação fica
+	# na ponta direita do cartão e sairia da tela durante toda a entrada.
+	var desliza := -(1.0 - passo) * 140.0
+	var tinta := clampf(entrada * 2.4, 0.0, 1.0)
+	var alta := posicao <= 3 and not vazia
+	var card := Rect2(78.0 + desliza, y, 924.0, LINHA_ALTURA - 16.0)
+
+	if vazia:
+		_placa(card, 10.0, Color("170509", tinta * 0.9))
+		draw_rect(card, Color("3d1019", tinta * 0.8), false, 1.5)
+		_texto("%02d" % posicao, y + 62.0, 34, Color("4a1420", tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 30.0)
+		_texto("VAGA ABERTA", y + 62.0, 26, Color("6d2835", tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0)
+		return
+
+	# O CORPO DO CARTÃO. O pódio é mais claro e tem a borda na cor da
+	# medalha; do quarto para baixo todos são iguais, e é essa igualdade
+	# que faz os três primeiros valerem alguma coisa.
+	var fundo := Color("b21029") if e_do_jogador else (Color("3a0d1a") if alta else Color("240810"))
+	_placa(card, 10.0, Color(fundo, tinta))
+	draw_rect(card, Color(cor, tinta * (0.95 if alta or e_do_jogador else 0.45)), false, 3.0 if alta or e_do_jogador else 1.5)
+	# A TARJA NA COR DA POSIÇÃO, na lateral. Custa um retângulo e resolve
+	# a leitura a distância: ouro, prata, bronze e o resto, sem ler nada.
+	draw_rect(Rect2(card.position, Vector2(8.0, card.size.y)), Color(cor, tinta))
+
+	# A ficha do número, num quadrado próprio. Um número solto no meio de
+	# um cartão some; dentro de uma ficha ele vira o índice da linha.
+	#
+	# NO PÓDIO A FICHA É A MEDALHA: cheia, na cor, com o número escuro
+	# dentro. Fora do pódio ela é um quadrado NEUTRO com o número na cor.
+	# Tingir o quadrado com a cor da posição a 18% parecia econômico e
+	# saía marrom-oliva por cima do cartão vermelho-escuro — uma cor que
+	# não é de ninguém e suja a lista inteira. Cor cheia ou cor nenhuma.
+	var ficha := Rect2(card.position.x + 24.0, y + 14.0, 82.0, 82.0)
+	_placa(ficha, 10.0, Color(cor, tinta) if alta else Color("140309", tinta * 0.92))
+	if not alta:
+		draw_rect(ficha, Color(cor, tinta * 0.35), false, 1.5)
+	_texto(
+		"%02d" % posicao, ficha.position.y + 56.0, 36,
+		Color(Color("1a0409") if alta else cor, tinta),
+		HORIZONTAL_ALIGNMENT_CENTER, ficha.position.x, ficha.size.x
+	)
+	if alta:
+		Icones.estrela(self, Vector2(ficha.end.x + 2.0, ficha.position.y + 6.0), 11.0, Color(cor, tinta))
+
+	_draw_player_photo(Rect2(card.position + Vector2(126.0, 14.0), Vector2(82.0, 82.0)), str(ranking[i].get("photo_path", "")), tinta)
+	_texto(
+		"VOCÊ" if e_do_jogador else ("CAMPEÃO" if posicao == 1 else "JOGADOR"),
+		y + 46.0, 24, Color(Paleta.TINTA_FRACA if not e_do_jogador else Paleta.CREME, tinta),
+		HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0
+	)
+	# O NOME DO NÍVEL, embaixo. Sai da própria nota, então não custa dado
+	# nenhum guardado — e diz mais do que a data: numa lista de números de
+	# quatro dígitos, "NOCAUTE" é o que se lê de longe.
+	_texto(
+		ScoreTier.nome_de(RankingStore.score_at(ranking, i)), y + 76.0, 16,
+		Color(ScoreTier.cor_de(RankingStore.score_at(ranking, i)), tinta * 0.85),
+		HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0, 320.0
+	)
+	_texto(
+		"%04d" % RankingStore.score_at(ranking, i), y + 78.0,
+		56 if (alta or e_do_jogador) else 48,
+		Color(Paleta.TINTA, tinta), HORIZONTAL_ALIGNMENT_RIGHT,
+		card.position.x, card.size.x - 32.0
+	)
+
+## A LINHA DE QUEM ACABOU DE JOGAR: cai de cima, bate e acende.
+func _ranking_linha_do_jogador(i: int, y: float, assenta: float, celebracao: Dictionary) -> void:
+	var queda := (1.0 - _passo_com_batida(assenta)) * float(celebracao.get("queda", 150.0))
+	# O HALO SÓ NO INSTANTE DA BATIDA, e apagando depressa. Ele existe
+	# para marcar o quadro em que a linha encosta; sustentado, vira
+	# enfeite e some o sentido.
+	var y_final := y
+	if assenta >= 1.0:
+		var brilho := clampf(1.0 - (assenta - 1.0) * 6.0, 0.0, 1.0)
+		if brilho > 0.0:
+			for k in range(3):
+				var atras := Rect2(78.0, y_final, 924.0, LINHA_ALTURA - 16.0).grow(6.0 + float(k) * 12.0)
+				_placa(atras, 14.0, Color(Paleta.AMBAR, (0.12 - float(k) * 0.035) * brilho))
+	_ranking_linha(i, y_final - queda, clampf(assenta * 1.6, 0.0, 1.0), true)
+
+## O rodapé: a nota da rodada e o convite para jogar de novo.
+func _ranking_rodape() -> void:
+	_rotulo("SEU SOCO", 1428.0, Paleta.TINTA_FRACA)
+	_texto_arcade("%04d" % result_score, 1546.0, 100, ScoreTier.cor_de(result_score), LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 	# NO RANKING ELA É GRANDE. Esta é a tela que o pessoal fotografa com
 	# o celular para mandar no grupo — é a que mais sai do salão, e a
@@ -4801,7 +5036,7 @@ func _central_golpe() -> void:
 	# faltava enquanto a dificuldade era um expoente adimensional numa
 	# caixa ao lado, que só dizia alguma coisa a quem já sabia a conta.
 	# Ver `ScoreCurve`.
-	_secao(Rect2(80, 350, 920, 284), "A RÉGUA DO SOCO", Paleta.CIANO)
+	_secao(Rect2(80, 350, 920, 420), "A RÉGUA DO SOCO", Paleta.CIANO)
 	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
 	_stepper(
@@ -4830,22 +5065,71 @@ func _central_golpe() -> void:
 	# máquina que já tinha um valor gravado. O que saiu foi a segunda
 	# maneira de mexer nele.
 
-	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	# A LEITURA AO VIVO — E POR QUE ELA FALTAVA TANTO.
+	#
+	# A tela nunca mostrou a velocidade. Quando a régua está errada para
+	# o gabinete, o sintoma é "todo mundo tira mil pontos" e não há como
+	# descobrir por quê: a nota baixa parece dificuldade, não escala
+	# errada. Com o número em m/s ao lado da nota, uma batida responde a
+	# pergunta inteira — e os três botões abaixo consertam na mesma hora.
+	_leitura_do_ultimo_soco(630.0)
+	_botao(BOTOES_SIMPLES["usar_min"], "É O MÍNIMO", false, Paleta.CIANO, 17)
+	_botao(BOTOES_SIMPLES["usar_ref"], "É O SOCO MÉDIO", false, Paleta.AMBAR, 17)
+	_botao(BOTOES_SIMPLES["usar_max"], "É O MÁXIMO", false, Paleta.VERMELHO, 17)
+	_texto(
+		"bata uma vez e toque no que aquele soco deve valer — a régua se ajusta na hora",
+		752.0, 15, Paleta.TINTA_FRACA
+	)
+
+	# ------------------------------------------------- aprende sozinha
+	_secao(Rect2(80, 794, 920, 186), "A RÉGUA APRENDE SOZINHA", Paleta.VERDE)
+	_botao(
+		BOTOES_SIMPLES["auto_escala"],
+		"APRENDIZADO: LIGADO" if auto_escala.ligada else "APRENDIZADO: DESLIGADO",
+		auto_escala.ligada, Paleta.VERDE, 18
+	)
+	_botao(BOTOES_SIMPLES["esquecer_escala"], "ESQUECER E RECOMEÇAR", false, Paleta.ROXO, 18)
+	var memoria := auto_escala.quantos()
+	var estado := "aprendendo — %d socos na memória (precisa de %d)" % [
+		memoria, AutoEscala.MINIMO_PARA_VALER
+	]
+	if not auto_escala.ligada:
+		estado = "desligado — a régua fica exatamente onde você deixou"
+	elif auto_escala.pronta():
+		estado = "ativo — %d socos na memória, ajustando aos poucos" % memoria
+	_texto(estado, 930.0, 16, Paleta.CREME if auto_escala.pronta() else Paleta.TINTA_FRACA)
+	var destino := auto_escala.alvo()
+	if destino.is_empty():
+		_texto(
+			"a metade do salão fica acima de %d pontos e a metade abaixo, em qualquer gabinete" % (
+				ScoreCurve.PONTOS_DE_REFERENCIA
+			),
+			958.0, 14, Paleta.TINTA_LEVE
+		)
+	else:
+		_texto(
+			"indo para  %.2f  /  %.2f  /  %.2f m/s   (mínimo / médio / máximo)" % [
+				float(destino["vmin"]), float(destino["vref"]), float(destino["vmax"])
+			],
+			958.0, 14, Paleta.CIANO
+		)
+
+	_secao(Rect2(80, 1004, 920, 236), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
 	# A régua engordou e a legenda desceu: com a letra no corpo novo, o
 	# nome do nível dentro da faixa e a legenda logo abaixo escreviam um
 	# por cima do outro.
-	_regua_dos_niveis(Rect2(110, 700, 860, 46))
+	_regua_dos_niveis(Rect2(110, 1052, 860, 46))
 	_texto(
 		"As faixas são fixas. Quem decide quanta gente chega a cada uma é o soco médio.",
-		772.0, 15, Paleta.TINTA_FRACA
+		1126.0, 15, Paleta.TINTA_FRACA
 	)
-	_curva_desenhada(Rect2(110, 782, 860, 56))
+	_curva_desenhada(Rect2(110, 1138, 860, 56))
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
-	_secao(Rect2(80, 926, 920, 300), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
+	_secao(Rect2(80, 1340, 920, 320), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 972.0), 7.0, dot, true, -1.0, true)
-	_texto(serial_status, 978.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	draw_circle(Vector2(560, 1386.0), 7.0, dot, true, -1.0, true)
+	_texto(serial_status, 1392.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
 	_stepper(
 		"porta",
 		porta_configurada if not porta_configurada.is_empty() else "AUTO",
@@ -4854,7 +5138,7 @@ func _central_golpe() -> void:
 	)
 	var nome_polaridade: String = str({"A":"AUTO", "H":"ALTO", "L":"BAIXO"}.get(sensor_eixo, "AUTO"))
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
-	_texto("POLARIDADE DO BLOQUEIO", 1102.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_texto("POLARIDADE DO BLOQUEIO", 1516.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.0f mm" % (sensor_raio * 1000.0), "LARGURA DA PALHETA", Paleta.CIANO)
 	# O PULSO MÍNIMO PERDEU O − E O +, E ISSO É O CONSERTO.
 	#
@@ -4867,7 +5151,7 @@ func _central_golpe() -> void:
 	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
 	# dentro disso.
 	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
-	var caixa_pulso := Rect2(570, 1124, 400, LADO_BOTAO)
+	var caixa_pulso := Rect2(570, 1538, 400, LADO_BOTAO)
 	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
 	_texto(
 		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
@@ -4881,24 +5165,72 @@ func _central_golpe() -> void:
 		"o sensor mede de %.2f a %.1f m/s  •  a régua vai até %.1f" % [
 			janela.x, janela.y, hit_max_speed
 		],
-		1222.0, 15,
+		1650.0, 15,
 		Paleta.VERMELHO if janela.y < hit_max_speed else Paleta.TINTA_LEVE,
 		HORIZONTAL_ALIGNMENT_CENTER, 120.0, 840.0
 	)
 
-	_secao(Rect2(80, 1252, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_secao(Rect2(80, 1684, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1420.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1836.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	if not saturacao_recente.is_empty():
 		_texto(
-			"SATURAÇÃO DO SENSOR: %s — aumente a faixa do MPU-6050" % saturacao_recente,
-			1452.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			"SATURAÇÃO DO SENSOR: %s" % saturacao_recente,
+			1868.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
+
+## A ÚLTIMA BATIDA, EM VELOCIDADE E EM PONTOS, LADO A LADO.
+##
+## Duas informações e uma conclusão. A velocidade diz o que o sensor
+## entregou; a nota diz o que a régua fez com ela; e a barra embaixo
+## mostra ONDE aquele soco caiu dentro da régua. Quando todo mundo tira
+## mil pontos, a barra fica colada na esquerda — e aí a resposta deixa de
+## ser "o pessoal bate fraco" e passa a ser "o máximo da régua está longe
+## demais do que esta máquina mede", que é o que de fato acontecia.
+func _leitura_do_ultimo_soco(y: float) -> void:
+	var caixa := Rect2(110, y - 26.0, 860, 62)
+	_cartao(caixa, Color("14040a"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+	if ultima_velocidade <= 0.0:
+		_texto(
+			"nenhum soco ainda — bata uma vez, ou use TESTAR SENSOR",
+			y + 12.0, 16, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
+		)
+		return
+	_texto(
+		"ÚLTIMO SOCO", y - 2.0, 14, Paleta.TINTA_FRACA,
+		HORIZONTAL_ALIGNMENT_LEFT, caixa.position.x + 18.0, 200.0
+	)
+	_texto(
+		"%.2f m/s" % ultima_velocidade, y + 24.0, 26, Paleta.CIANO,
+		HORIZONTAL_ALIGNMENT_LEFT, caixa.position.x + 18.0, 240.0
+	)
+	_texto(
+		"%04d" % ultima_nota, y + 24.0, 30, ScoreTier.cor_de(ultima_nota),
+		HORIZONTAL_ALIGNMENT_RIGHT, caixa.position.x, caixa.size.x - 20.0
+	)
+	_texto(
+		ScoreTier.nome_de(ultima_nota), y - 2.0, 14, Paleta.TINTA_FRACA,
+		HORIZONTAL_ALIGNMENT_RIGHT, caixa.position.x, caixa.size.x - 20.0
+	)
+	# ONDE AQUELE SOCO CAIU NA RÉGUA. É a linha que denuncia a escala.
+	var trilho := Rect2(caixa.position.x + 300.0, y + 6.0, 260.0, 10.0)
+	draw_rect(trilho, Color("3a1018"))
+	var fracao := ScoreCurve.normalized(
+		ultima_velocidade, hit_min_speed, hit_max_speed, score_dead_zone
+	)
+	draw_rect(
+		Rect2(trilho.position, Vector2(maxf(trilho.size.x * fracao, 3.0), trilho.size.y)),
+		ScoreTier.cor_de(ultima_nota)
+	)
+	_texto(
+		"%d%% da régua" % int(round(fracao * 100.0)), y + 34.0, 13, Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_CENTER, trilho.position.x, trilho.size.x
+	)
 
 ## A CURVA DESENHADA, do jeito que ela vai pagar.
 ##
