@@ -101,8 +101,8 @@ const PASSOS := {
 	# da régua que ela é.
 	"referencia": Rect2(110, 526, 400, 58),
 	"curva": Rect2(570, 526, 400, 58),
-	"porta": Rect2(110, 1424, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1538, 400, LADO_BOTAO),
+	"porta": Rect2(110, 1470, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1586, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
@@ -121,15 +121,15 @@ const BOTOES_SIMPLES := {
 	# jeito certo de calibrar do zero, mas não é o que se quer com a fila
 	# esperando e a máquina pagando mil pontos para todo mundo: aí se quer
 	# bater UMA vez e dizer "este é o máximo". É isso, e é imediato.
-	"usar_min": Rect2(110, 672, 275, 56),
-	"usar_ref": Rect2(402, 672, 276, 56),
-	"usar_max": Rect2(695, 672, 275, 56),
-	"auto_escala": Rect2(110, 842, 400, 60),
-	"esquecer_escala": Rect2(570, 842, 400, 60),
-	"calibrar": Rect2(300, 1258, 480, 56),
-	"eixo": Rect2(620, 1424, 280, LADO_BOTAO),
-	"enviar_config": Rect2(110, 1730, 400, 56),
-	"testar": Rect2(570, 1730, 400, 56),
+	"usar_min": Rect2(110, 708, 275, 56),
+	"usar_ref": Rect2(402, 708, 276, 56),
+	"usar_max": Rect2(695, 708, 275, 56),
+	"auto_escala": Rect2(110, 876, 400, 60),
+	"esquecer_escala": Rect2(570, 876, 400, 60),
+	"calibrar": Rect2(300, 1302, 480, 56),
+	"eixo": Rect2(620, 1470, 280, LADO_BOTAO),
+	"enviar_config": Rect2(110, 1782, 400, 56),
+	"testar": Rect2(570, 1782, 400, 56),
 	# --- página CÂMERA
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
@@ -5036,7 +5036,7 @@ func _central_golpe() -> void:
 	# faltava enquanto a dificuldade era um expoente adimensional numa
 	# caixa ao lado, que só dizia alguma coisa a quem já sabia a conta.
 	# Ver `ScoreCurve`.
-	_secao(Rect2(80, 350, 920, 420), "A RÉGUA DO SOCO", Paleta.CIANO)
+	_secao(Rect2(80, 350, 920, 452), "A RÉGUA DO SOCO", Paleta.CIANO)
 	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
 	_stepper(
@@ -5072,17 +5072,17 @@ func _central_golpe() -> void:
 	# descobrir por quê: a nota baixa parece dificuldade, não escala
 	# errada. Com o número em m/s ao lado da nota, uma batida responde a
 	# pergunta inteira — e os três botões abaixo consertam na mesma hora.
-	_leitura_do_ultimo_soco(630.0)
+	_leitura_do_ultimo_soco(666.0)
 	_botao(BOTOES_SIMPLES["usar_min"], "É O MÍNIMO", false, Paleta.CIANO, 17)
 	_botao(BOTOES_SIMPLES["usar_ref"], "É O SOCO MÉDIO", false, Paleta.AMBAR, 17)
 	_botao(BOTOES_SIMPLES["usar_max"], "É O MÁXIMO", false, Paleta.VERMELHO, 17)
 	_texto(
 		"bata uma vez e toque no que aquele soco deve valer — a régua se ajusta na hora",
-		752.0, 15, Paleta.TINTA_FRACA
+		790.0, 15, Paleta.TINTA_FRACA
 	)
 
 	# ------------------------------------------------- aprende sozinha
-	_secao(Rect2(80, 794, 920, 186), "A RÉGUA APRENDE SOZINHA", Paleta.VERDE)
+	_secao(Rect2(80, 826, 920, 190), "A RÉGUA APRENDE SOZINHA", Paleta.VERDE)
 	_botao(
 		BOTOES_SIMPLES["auto_escala"],
 		"APRENDIZADO: LIGADO" if auto_escala.ligada else "APRENDIZADO: DESLIGADO",
@@ -5097,39 +5097,39 @@ func _central_golpe() -> void:
 		estado = "desligado — a régua fica exatamente onde você deixou"
 	elif auto_escala.pronta():
 		estado = "ativo — %d socos na memória, ajustando aos poucos" % memoria
-	_texto(estado, 930.0, 16, Paleta.CREME if auto_escala.pronta() else Paleta.TINTA_FRACA)
+	_texto(estado, 968.0, 16, Paleta.CREME if auto_escala.pronta() else Paleta.TINTA_FRACA)
 	var destino := auto_escala.alvo()
 	if destino.is_empty():
 		_texto(
 			"a metade do salão fica acima de %d pontos e a metade abaixo, em qualquer gabinete" % (
 				ScoreCurve.PONTOS_DE_REFERENCIA
 			),
-			958.0, 14, Paleta.TINTA_LEVE
+			996.0, 14, Paleta.TINTA_LEVE
 		)
 	else:
 		_texto(
 			"indo para  %.2f  /  %.2f  /  %.2f m/s   (mínimo / médio / máximo)" % [
 				float(destino["vmin"]), float(destino["vref"]), float(destino["vmax"])
 			],
-			958.0, 14, Paleta.CIANO
+			996.0, 14, Paleta.CIANO
 		)
 
-	_secao(Rect2(80, 1004, 920, 236), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	_secao(Rect2(80, 1042, 920, 240), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
 	# A régua engordou e a legenda desceu: com a letra no corpo novo, o
 	# nome do nível dentro da faixa e a legenda logo abaixo escreviam um
 	# por cima do outro.
-	_regua_dos_niveis(Rect2(110, 1052, 860, 46))
+	_regua_dos_niveis(Rect2(110, 1092, 860, 46))
 	_texto(
 		"As faixas são fixas. Quem decide quanta gente chega a cada uma é o soco médio.",
-		1126.0, 15, Paleta.TINTA_FRACA
+		1166.0, 15, Paleta.TINTA_FRACA
 	)
-	_curva_desenhada(Rect2(110, 1138, 860, 56))
+	_curva_desenhada(Rect2(110, 1180, 860, 56))
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
-	_secao(Rect2(80, 1340, 920, 320), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
+	_secao(Rect2(80, 1386, 920, 324), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 1386.0), 7.0, dot, true, -1.0, true)
-	_texto(serial_status, 1392.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	draw_circle(Vector2(560, 1432.0), 7.0, dot, true, -1.0, true)
+	_texto(serial_status, 1438.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
 	_stepper(
 		"porta",
 		porta_configurada if not porta_configurada.is_empty() else "AUTO",
@@ -5138,7 +5138,7 @@ func _central_golpe() -> void:
 	)
 	var nome_polaridade: String = str({"A":"AUTO", "H":"ALTO", "L":"BAIXO"}.get(sensor_eixo, "AUTO"))
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
-	_texto("POLARIDADE DO BLOQUEIO", 1516.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_texto("POLARIDADE DO BLOQUEIO", 1562.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.0f mm" % (sensor_raio * 1000.0), "LARGURA DA PALHETA", Paleta.CIANO)
 	# O PULSO MÍNIMO PERDEU O − E O +, E ISSO É O CONSERTO.
 	#
@@ -5151,7 +5151,7 @@ func _central_golpe() -> void:
 	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
 	# dentro disso.
 	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
-	var caixa_pulso := Rect2(570, 1538, 400, LADO_BOTAO)
+	var caixa_pulso := Rect2(570, 1586, 400, LADO_BOTAO)
 	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
 	_texto(
 		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
@@ -5165,23 +5165,23 @@ func _central_golpe() -> void:
 		"o sensor mede de %.2f a %.1f m/s  •  a régua vai até %.1f" % [
 			janela.x, janela.y, hit_max_speed
 		],
-		1650.0, 15,
+		1700.0, 15,
 		Paleta.VERMELHO if janela.y < hit_max_speed else Paleta.TINTA_LEVE,
 		HORIZONTAL_ALIGNMENT_CENTER, 120.0, 840.0
 	)
 
-	_secao(Rect2(80, 1684, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_secao(Rect2(80, 1734, 920, 124), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1836.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1890.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	if not saturacao_recente.is_empty():
 		_texto(
 			"SATURAÇÃO DO SENSOR: %s" % saturacao_recente,
-			1868.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			1922.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
 
 ## A ÚLTIMA BATIDA, EM VELOCIDADE E EM PONTOS, LADO A LADO.
@@ -6041,12 +6041,53 @@ const CAIXA_LEITURA := 1.047
 ## Quem pede menos que o piso recebe o piso. É por isso que existe um
 ## piso e não uma revisão de cada chamada: com quarenta lugares pedindo
 ## tamanho, a próxima linha escrita com 14 voltaria a ser ilegível.
-const CORPO_MINIMO := 18
+const CORPO_MINIMO := 20
+
+## A ESCALA TIPOGRÁFICA — E POR QUE ELA PRECISA EXISTIR.
+##
+## Contados, havia TRINTA corpos de letra diferentes pedidos pela tela:
+## 13, 14, 15, 16, 18, 20, 22, 24, 25, 26, 28, 30, 32, 34, 36, 38, 42, 44,
+## 46, 50, 52, 54, 56, 58, 62, 72, 88, 96, 100, 104… Nenhum deles se
+## relaciona com o vizinho; cada um nasceu de um ajuste solto num dia
+## diferente. É exatamente isso que dá a impressão de "coisas novas que
+## não estão uniformes": 15 e 16 são o MESMO tamanho para o olho, mas os
+## dois juntos na mesma tela leem como desalinho, não como hierarquia.
+##
+## Uma escala resolve com poucos degraus, cada um claramente diferente do
+## anterior. Esta cresce a cerca de 1,25× por passo — o intervalo em que
+## dois tamanhos vizinhos se distinguem sem brigar:
+##
+##   MIÚDO 20 · APOIO 25 · RÓTULO 31 · CORPO 39 · DESTAQUE 48
+##   TÍTULO 60 · CARTAZ 75 · PLACAR 94 · HERÓI 118
+##
+## COMO ELA É APLICADA SEM REESCREVER CENTO E CINQUENTA CHAMADAS. Todo
+## texto do jogo passa por `_corpo`, e é aqui que o tamanho pedido é
+## ENCAIXADO no degrau mais próximo. Um 15 e um 16 viram os dois 20; um 34
+## e um 36 viram os dois 39. A tela inteira passa a falar em nove
+## tamanhos, e uma linha nova escrita com um número solto continua caindo
+## na escala sozinha — que é o único jeito de isto não se desfazer na
+## próxima alteração.
+const ESCALA := [20, 25, 31, 39, 48, 60, 75, 94, 118]
 
 func _corpo(tamanho: int) -> int:
-	if fonte_texto == fonte:
-		return maxi(CORPO_MINIMO, tamanho)
-	return maxi(CORPO_MINIMO, int(round(float(tamanho) * CAIXA_LEITURA)))
+	var pedido := tamanho if fonte_texto == fonte else int(round(float(tamanho) * CAIXA_LEITURA))
+	return _encaixar_na_escala(maxi(CORPO_MINIMO, pedido))
+
+## O degrau mais próximo, por distância relativa — em tipografia o que o
+## olho compara é a RAZÃO entre dois tamanhos, não a diferença: de 20 para
+## 25 é o mesmo salto que de 75 para 94.
+func _encaixar_na_escala(tamanho: int) -> int:
+	var melhor: int = ESCALA[0]
+	var menor_erro := 1.0e30
+	for degrau in ESCALA:
+		var erro: float = absf(log(float(tamanho) / float(degrau)))
+		if erro < menor_erro:
+			menor_erro = erro
+			melhor = degrau
+	# Acima do maior degrau a escala não manda: o placar herói e os
+	# números gigantes do impacto são desenhados no tamanho que couber na
+	# largura da tela, e encaixá-los aqui os encolheria à toa.
+	return maxi(melhor, tamanho) if tamanho > int(ESCALA[ESCALA.size() - 1]) else melhor
 
 ## O CACHE DE `_tamanho_que_cabe`.
 ##
@@ -6173,7 +6214,7 @@ func _letreiro(
 ## permite subir o corpo dos dois papéis sem que nada estoure a linha: a
 ## tela ganha letra maior E linha mais curta ao mesmo tempo, que é o que
 ## faltava para ler de longe.
-const CORPO_ROTULO := 30
+const CORPO_ROTULO := 31
 const CORPO_APOIO := 25
 
 func _rotulo(texto: String, y: float, cor: Color) -> void:
