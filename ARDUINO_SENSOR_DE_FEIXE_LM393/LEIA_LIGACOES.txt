@@ -1,0 +1,32 @@
+FIRMWARE DEFINITIVO - SENSOR DE FEIXE LM393
+===========================================
+
+Grave o arquivo ARDUINO_SENSOR_DE_FEIXE_LM393.ino no Arduino Uno/Nano.
+
+SENSOR:
+  VCC -> 5V
+  GND -> GND
+  D0  -> D4   (medicao rapida por interrupcao PCINT20)
+  A0  -> A0   (diagnostico na Central Tecnica)
+
+BOTOES:
+  START  -> D2 e GND
+  CREDIT -> D3 e GND
+
+FITAS WS2812B:
+  dados esquerda -> D5
+  dados direita  -> D6
+  alimentacao por fonte 5V externa, com GND comum ao Arduino
+  biblioteca: Adafruit NeoPixel
+
+FUNCIONAMENTO DOS DOIS SOCOS:
+  O jogo envia ARM antes do primeiro soco e envia outro ARM ao rearmar o
+  segundo. Cada ARM limpa bordas antigas e permite exatamente um HIT. Um
+  retorno da palheta nao gasta o segundo soco.
+
+MEDIDA:
+  velocidade = largura da palheta / tempo de bloqueio do feixe
+
+Padrao: palheta 20 mm, pulso minimo 0,70 ms, polaridade AUTO. Ligue a
+maquina com a fenda livre. A palheta deve entrar e sair completamente.
+
