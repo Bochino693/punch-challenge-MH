@@ -424,6 +424,12 @@ func _pintar_de_desenho(corpo: Node3D) -> void:
 			var antigo := malha.get_active_material(s)
 			if antigo is BaseMaterial3D:
 				cor = (antigo as BaseMaterial3D).albedo_color
+			# As peças que o próprio controlador criou (a boca) não vieram
+			# do GLB e não têm material de origem: elas dizem a sua cor.
+			if lutador != null:
+				var declarada = lutador.cor_da_peca(malha)
+				if declarada != null:
+					cor = declarada
 			var tinta := ShaderMaterial.new()
 			tinta.shader = TOON
 			tinta.set_shader_parameter("cor_base", cor)
@@ -433,7 +439,18 @@ func _pintar_de_desenho(corpo: Node3D) -> void:
 			# só, igual para tudo, achata a figura; um traço que puxa para
 			# a cor do que está contornando é o que ilustrador faz.
 			traco.set_shader_parameter("cor", cor.darkened(0.86))
-			tinta.next_pass = traco
+			# O CONTORNO É PARA A SILHUETA, NÃO PARA O DETALHE.
+			#
+			# A casca invertida empurra cada vértice 1,6 cm para fora. Numa
+			# peça de 2 cm — a boca, o lábio — isso é a peça inteira: a
+			# casca fica maior que o original, aparece por fora dele e o
+			# rosto ganha riscos pretos soltos em volta. Peça pequena
+			# dispensa contorno; ela já está contornada pela sombra da
+			# cara em volta.
+			var caixa_da_peca := geometria.get_aabb().size
+			var menor := minf(caixa_da_peca.x, minf(caixa_da_peca.y, caixa_da_peca.z))
+			if menor > 0.06:
+				tinta.next_pass = traco
 			malha.set_surface_override_material(s, tinta)
 			_peles.append(tinta)
 

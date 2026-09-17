@@ -75,10 +75,54 @@ const ALIASES := {
 ##
 ## Um terço a mais basta. Acima disso o pescoço aparece fino demais e o
 ## boneco vira caricatura de si mesmo.
-const ESCALA_DA_CABECA := 1.34
+## A ESCULTURA: PROPORÇÃO DE ATLETA EM CIMA DO MODELO QUE EXISTE.
+##
+## A queixa foi "parece um gordinho". O modelo não tem gordura nenhuma —
+## tem as PROPORÇÕES erradas para o personagem que a referência pede, e
+## são três, cada uma bastando sozinha:
+##
+##   LUVA DO TAMANHO DA CABEÇA. É a mais forte de todas. Luva enorme é
+##   linguagem de desenho infantil, e ainda escondia o rosto inteiro na
+##   guarda — não dá para gostar de um personagem que nunca se vê.
+##   CINTURA DA LARGURA DO PEITO. Sem o V do tronco, o corpo lê como um
+##   retângulo, e retângulo lê como corpo mole por mais músculo que
+##   tenha desenhado em cima.
+##   CABEÇA PEQUENA. Proporção realista num boneco estilizado dá aquele
+##   ar de action figure genérico.
+##
+## Regravar a malha exigiria Blender; reescalar OSSO não exige nada. E
+## como a escala de um osso desce para os filhos, o V sai de duas linhas:
+## afina a coluna (que leva o peito e os braços junto) e devolve a largura
+## só nos OMBROS. Cintura fina, ombro largo, e nenhum vértice movido à mão.
+##
+## Tudo isto é aplicado DEPOIS da animação, todo quadro — ver
+## `_esculpir`. O tocador reescreve a pose de cada osso a cada quadro, e
+## um ajuste feito uma vez na montagem seria apagado no primeiro
+## movimento.
+const ESCALA_DA_CABECA := 1.16
 const OSSO_DA_CABECA := "head"
 
+## Cada entrada é `osso: escala`. Uniforme onde a peça inteira muda de
+## tamanho; por eixo onde o que muda é a forma.
+const ESCULTURA := {
+	# As luvas encolhem um terço. A mais importante das três.
+	"glove_l": Vector3(0.66, 0.66, 0.66),
+	"glove_r": Vector3(0.66, 0.66, 0.66),
+	# A cintura afina — e leva peito, braços e cabeça junto, porque escala
+	# de osso desce para os filhos.
+	"spine": Vector3(0.82, 1.05, 0.86),
+	# …e os ombros devolvem a largura, só aí. É isto, e só isto, que
+	# desenha o V.
+	"shoulder_l": Vector3(1.26, 1.0, 1.16),
+	"shoulder_r": Vector3(1.26, 1.0, 1.16),
+	# O antebraço afina um pouco: braço de boxeador é grosso em cima e
+	# fino embaixo, e era reto dos dois lados.
+	"forearm_l": Vector3(0.92, 1.0, 0.92),
+	"forearm_r": Vector3(0.92, 1.0, 0.92),
+}
+
 var _osso_cabeca := -1
+var _escultura_indices: Dictionary = {}
 var _juntas: Dictionary = {}
 var _repouso: Dictionary = {}
 var _raiz: Node3D = null
@@ -106,6 +150,15 @@ func montar(corpo: Node3D) -> void:
 	_indexar_animacoes()
 	_ajustar_loops()
 	_osso_cabeca = _esqueleto.find_bone(OSSO_DA_CABECA) if _esqueleto != null else -1
+	_dar_uma_boca()
+	# Os índices são procurados UMA vez: `find_bone` percorre a lista de
+	# ossos por nome, e isto roda em todo quadro.
+	_escultura_indices.clear()
+	if _esqueleto != null:
+		for nome in ESCULTURA:
+			var osso := _esqueleto.find_bone(str(nome))
+			if osso >= 0:
+				_escultura_indices[str(nome)] = osso
 	_osso_raiz = _esqueleto.find_bone(OSSO_RAIZ) if _esqueleto != null else -1
 	for nome in JUNTAS:
 		var no := corpo.find_child(nome, true, false)
@@ -113,6 +166,68 @@ func montar(corpo: Node3D) -> void:
 			_juntas[nome] = no
 			_repouso[nome] = (no as Node3D).transform
 	_repouso["__raiz__"] = corpo.transform
+
+## A BOCA QUE O MODELO NUNCA TEVE.
+##
+## "Sem boca" foi a queixa, e é literal: o GLB traz olhos e sobrancelhas
+## e para aí. Uma cabeça com dois olhos e mais nada não é um rosto — é um
+## ovo —, e nenhuma quantidade de sombreamento conserta isso.
+##
+## Ela é pendurada no OSSO DA CABEÇA, com um `BoneAttachment3D`: assim
+## acompanha cada virada de cabeça das nove animações sem que nenhuma
+## delas precise saber que ela existe. E é geometria nova, criada aqui —
+## não depende de o arquivo do boneco ter sido regravado, então continua
+## valendo se alguém trocar o `lutador.glb` por outro com os mesmos ossos.
+##
+## O desenho é o mínimo que lê a três metros: uma boca escura e um lábio
+## de baixo. Boca fina demais some dentro do contorno preto do desenho, e
+## foi por isso que a primeira tentativa não apareceu na tela.
+## MEDIDO NA TELA, E NÃO ESTIMADO. A primeira posição pôs a boca DENTRO
+## da cabeça: apareciam dois risquinhos escuros nas bordas e mais nada. A
+## cabeça deste modelo é um volume arredondado de uns 19 cm de raio, então
+## a superfície do rosto na altura da boca fica perto de 17 cm à frente do
+## osso — não 11.
+const BOCA_LOCAL := Vector3(0.0, 0.046, 0.170)
+const BOCA_TAMANHO := Vector3(0.072, 0.019, 0.050)
+
+func _dar_uma_boca() -> void:
+	if _esqueleto == null or _osso_cabeca < 0:
+		return
+	var suporte := BoneAttachment3D.new()
+	suporte.name = "SuporteDaBoca"
+	suporte.bone_idx = _osso_cabeca
+	_esqueleto.add_child(suporte)
+
+	var boca := MeshInstance3D.new()
+	boca.name = "Boca"
+	var caixa := BoxMesh.new()
+	caixa.size = BOCA_TAMANHO
+	boca.mesh = caixa
+	boca.position = BOCA_LOCAL
+	boca.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	suporte.add_child(boca)
+
+	var labio := MeshInstance3D.new()
+	labio.name = "Labio"
+	var caixa2 := BoxMesh.new()
+	caixa2.size = Vector3(BOCA_TAMANHO.x * 0.86, 0.010, BOCA_TAMANHO.z * 0.94)
+	labio.mesh = caixa2
+	labio.position = BOCA_LOCAL + Vector3(0.0, -0.013, 0.001)
+	labio.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	suporte.add_child(labio)
+
+	_pecas_do_rosto = [boca, labio]
+	_cores_do_rosto = [Color(0.13, 0.02, 0.03), Color(0.62, 0.22, 0.20)]
+
+## As peças criadas aqui precisam receber a mesma pintura do resto do
+## corpo; `Arena3D` as encontra pela varredura de malhas.
+var _pecas_do_rosto: Array[MeshInstance3D] = []
+var _cores_do_rosto: Array[Color] = []
+
+## A cor com que cada peça do rosto deve ser pintada. `Arena3D` pergunta.
+func cor_da_peca(malha: MeshInstance3D) -> Variant:
+	var i := _pecas_do_rosto.find(malha)
+	return _cores_do_rosto[i] if i >= 0 else null
 
 func tem_esqueleto() -> bool:
 	return _esqueleto != null and _esqueleto.get_bone_count() >= 15
@@ -409,9 +524,12 @@ func _aplicar_queda() -> void:
 ## `atualizar` e portanto depois de o tocador ter escrito, a escala vale
 ## em todas as nove animações sem precisar tocar em nenhuma delas.
 func _agrandar_a_cabeca() -> void:
-	if _esqueleto == null or _osso_cabeca < 0:
+	if _esqueleto == null:
 		return
-	_esqueleto.set_bone_pose_scale(_osso_cabeca, Vector3.ONE * ESCALA_DA_CABECA)
+	if _osso_cabeca >= 0:
+		_esqueleto.set_bone_pose_scale(_osso_cabeca, Vector3.ONE * ESCALA_DA_CABECA)
+	for nome in _escultura_indices:
+		_esqueleto.set_bone_pose_scale(_escultura_indices[nome], ESCULTURA[nome])
 
 func _pose_fallback() -> void:
 	if _raiz == null:

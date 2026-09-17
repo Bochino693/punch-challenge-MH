@@ -4,6 +4,39 @@ extends Node
 ## Webcam nativa. No Windows, CameraServerExtension usa Media Foundation e
 ## entrega os quadros diretamente ao Godot: sem Python, OpenCV, processo
 ## auxiliar ou JPEG intermediário.
+##
+## ------------------------------------------------------------------
+## POR QUE A CÂMERA "NÃO FUNCIONA EM OUTRAS MÁQUINAS"
+##
+## O FATO QUE EXPLICA TUDO: **o Godot não tem suporte de câmera no
+## Windows.** Não é um detalhe de configuração — o `CameraServer` do motor
+## só é implementado em Linux, macOS, Android e iOS. No Windows,
+## `CameraServer.feeds()` devolve uma lista VAZIA para sempre, haja webcam
+## ou não.
+##
+## Ou seja: no Windows a câmera deste jogo depende INTEIRAMENTE da
+## extensão nativa `CameraServerExtension` (a DLL em `addons/`). Com ela,
+## funciona; sem ela, não existe câmera nenhuma — nem a embutida do
+## notebook, que é exatamente o caso relatado.
+##
+## E A DLL SE PERDE COM FACILIDADE, por três motivos, nesta ordem:
+##
+##   1. COPIARAM SÓ O .EXE. O `.pck` está embutido no executável
+##      (`binary_format/embed_pck`), então o EXE PARECE bastar. Mas
+##      biblioteca nativa não entra em `.pck` — o Godot a exporta como
+##      arquivo solto ao lado do executável. Copiar só o EXE deixa a DLL
+##      para trás, e o jogo abre normalmente, sem câmera e sem erro.
+##   2. FALTA O VC++ REDISTRIBUTABLE. A DLL é compilada com MSVC. Numa
+##      máquina sem o *Visual C++ 2015-2022 x64*, o `LoadLibrary` falha
+##      silenciosamente e o resultado é idêntico ao item 1.
+##   3. WINDOWS ARM64. A extensão só traz `x86_64`. Num notebook Snapdragon
+##      a DLL não carrega.
+##
+## O DEFEITO DE VERDADE ERA A MENSAGEM. Em todos os três casos a tela
+## dizia "CONECTE UMA CÂMERA USB — BUSCANDO…", que é uma acusação falsa:
+## manda procurar hardware quando o problema é software, e some com a
+## única pista que resolveria em um minuto. `_diagnostico_da_plataforma`
+## existe para isso — dizer qual dos três aconteceu.
 
 const PHOTO_DIR := "user://ranking_photos"
 const THUMB_SIZE := 320
@@ -100,13 +133,36 @@ func _descobrir_cameras(recriar_extensao: bool) -> void:
 					return
 	_abrir_feed_disponivel()
 
+## A EXTENSÃO NATIVA ESTÁ CARREGADA?
+##
+## `ClassDB` só conhece a classe se a DLL foi carregada de verdade — é a
+## prova mais direta que existe, e não depende de procurar arquivo em
+## disco nem de adivinhar caminho de instalação.
+func extensao_nativa_presente() -> bool:
+	return ClassDB.class_exists(&"CameraServerExtension")
+
+## SEM CÂMERA: POR QUÊ, EM UMA FRASE QUE RESOLVE.
+##
+## Vazio quer dizer "é mesmo falta de câmera, procure uma". Qualquer outra
+## coisa é a máquina apontando o próprio defeito.
+func _diagnostico_da_plataforma() -> String:
+	if OS.get_name() != "Windows":
+		return ""
+	if extensao_nativa_presente():
+		return ""
+	# Aqui está a resposta para "funciona na minha máquina e em nenhuma
+	# outra": sem a extensão, o Windows não tem câmera nenhuma para o
+	# Godot, nem a embutida do notebook.
+	return "FALTA A DLL DA CÂMERA AO LADO DO JOGO — COPIE A PASTA INTEIRA"
+
 func _abrir_feed_disponivel() -> void:
 	if not enabled or _feed != null:
 		return
 	var feeds: Array = CameraServer.feeds()
 	if feeds.is_empty():
 		estado = Estado.SUBINDO
-		status = "CONECTE UMA CÂMERA USB — BUSCANDO…"
+		var motivo := _diagnostico_da_plataforma()
+		status = motivo if not motivo.is_empty() else "CONECTE UMA CÂMERA USB — BUSCANDO…"
 		return
 	selected_index = clampi(selected_index, 0, feeds.size() - 1)
 	_feed = feeds[selected_index]
@@ -136,7 +192,16 @@ func _selecionar_formato_estavel() -> void:
 		var numerador := float(formato.get("framerate_numerator", 0))
 		var denominador := maxf(float(formato.get("framerate_denominator", 1)), 1.0)
 		var fps := numerador / denominador
-		if largura <= 0 or altura <= 0 or fps < 20.0:
+		# A EXIGÊNCIA DE 20 fps DESCARTAVA CÂMERA DE NOTEBOOK.
+		#
+		# Muita câmera integrada não declara taxa de quadros: devolve
+		# numerador 0 e o cálculo dá zero. Com o `continue`, TODOS os
+		# formatos dela eram pulados e a escolha caía no formato 0 — que
+		# em várias delas é o modo mais alto e mais lento que existe.
+		# Taxa desconhecida não é taxa ruim; só não é informação.
+		if largura <= 0 or altura <= 0:
+			continue
+		if fps > 0.0 and fps < 20.0:
 			continue
 		var distancia := absf(float(largura - 1280)) + absf(float(altura - 720)) * 1.5
 		var nota := -distancia + minf(fps, 30.0) * 20.0

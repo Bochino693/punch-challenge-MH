@@ -5310,18 +5310,42 @@ func _central_camera() -> void:
 		# este anel, os dois minutos são indistinguíveis de um botão que
 		# não fez nada — que foi exatamente a queixa que trouxe até aqui.
 		_carregando(Vector2(540.0, 1010.0), 26.0, Paleta.CIANO)
+	# A LINHA QUE RESPONDE "POR QUE NÃO FUNCIONA NAS OUTRAS MÁQUINAS".
+	#
+	# No Windows o Godot não tem câmera nenhuma por conta própria: tudo
+	# depende da extensão nativa. Sem ela, nem a webcam embutida do
+	# notebook aparece — e a tela dizia "conecte uma câmera USB", que
+	# manda procurar hardware quando o problema é um arquivo que ficou
+	# para trás na cópia. Ver `CameraService`.
+	var nativa_ok := camera_service != null and camera_service.extensao_nativa_presente()
+	if OS.get_name() == "Windows":
+		_cartao(Rect2(110, 930, 860, 56), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+		if nativa_ok:
+			_texto(
+				"EXTENSÃO NATIVA DA CÂMERA: CARREGADA", 966.0, 17, Paleta.VERDE,
+				HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
+		else:
+			_texto(
+				"EXTENSÃO NATIVA NÃO CARREGOU — SEM ELA NÃO HÁ CÂMERA NO WINDOWS",
+				960.0, 17, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
+			_texto(
+				"copie a PASTA inteira do jogo (a DLL fica ao lado do .exe) e instale o VC++ 2015-2022 x64",
+				982.0, 14, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
 			"Captura nativa do Windows por Media Foundation — sem Python e sem OpenCV.",
-			1006.0, 15, Paleta.CIANO
+			1018.0, 15, Paleta.CIANO
 		)
 		_texto(
 			"Conecte a câmera USB: o jogo reconhece, mantém o vídeo ao vivo e só congela a foto.",
-			1030.0, 15, Paleta.TINTA_FRACA
+			1042.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
 			"DIAGNOSTICAR só consulta. RESOLVER ACESSO libera a privacidade do usuário.",
-			1054.0, 15, Paleta.TINTA_FRACA
+			1066.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
 		for i in range(medico.linhas.size()):
@@ -5921,6 +5945,15 @@ func _draw_alertas_graves() -> void:
 		recados.append(Versao.recado_do_estrago())
 	if link != null and not link.available():
 		recados.append("SEM CAMINHO ATÉ O ARDUINO — START, CRÉDITO E SENSOR MORTOS")
+	# A EXTENSÃO DA CÂMERA FALTANDO É ALERTA GRAVE, e não um detalhe de
+	# bancada: no Windows ela é a única fonte de imagem que existe, e com a
+	# câmera exigida a máquina nem chega a liberar rodada. Ficava escondida
+	# atrás do F9, que é justamente onde quem montou a máquina no salão não
+	# vai olhar. Ver `CameraService`.
+	if camera_enabled and camera_service != null \
+			and not camera_service.extensao_nativa_presente() \
+			and OS.get_name() == "Windows":
+		recados.append("FALTA A DLL DA CÂMERA — COPIE A PASTA INTEIRA DO JOGO, NÃO SÓ O .EXE")
 	if recados.is_empty():
 		return
 	var altura := 34.0 * float(recados.size()) + 16.0
