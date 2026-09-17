@@ -34,6 +34,8 @@ func _initialize() -> void:
 	_test_o_glb_existe_e_tem_contrato_humanoide()
 	_test_a_janela_tem_a_proporcao_do_buraco()
 	_test_as_barras_cabem_na_moldura()
+	_test_a_postura_parada_se_repete()
+	_test_a_reacao_dura_o_que_a_animacao_dura()
 	_test_o_dano_soma_e_nao_passa_de_um()
 	_test_cada_forca_tem_reacao_propria()
 	_test_desdenho_usa_a_nota_e_respeita_a_lona()
@@ -90,6 +92,67 @@ func _lutador() -> Lutador3D:
 	l.montar(corpo as Node3D)
 	l.preparar()
 	return l
+
+## A POSTURA PARADA TEM DE SE REPETIR, E NÃO RECOMEÇAR.
+##
+## O glTF não guarda modo de repetição, então o importador marca toda
+## animação como tocar-uma-vez — inclusive `idle`, de três segundos, e
+## `guard`, de dois. Elas acabavam, paravam, e no quadro seguinte o
+## controlador via que não estavam mais rodando e mandava tocar de novo
+## DO COMEÇO, com 0,2 s de mistura: um solavanco a cada ciclo, para
+## sempre, na tela em que o jogador mais olha para o boneco. Era a maior
+## parte do "o personagem não se mexe natural".
+##
+## Este teste é a única defesa possível, porque o defeito não aparece em
+## quadro nenhum isolado — só em quem fica olhando alguns segundos.
+func _test_a_postura_parada_se_repete() -> void:
+	for papel in Lutador3D.PAPEIS_CONTINUOS:
+		var l := _lutador()
+		var ap: AnimationPlayer = l._animador
+		if ap == null or not l._animacoes.has(papel):
+			l.free()
+			continue
+		var anim := ap.get_animation(l._animacoes[papel])
+		_ok(anim.loop_mode == Animation.LOOP_LINEAR,
+			"a postura %s tem de ser marcada como contínua" % papel)
+		l.free()
+	# E os gestos são o contrário: repetir um soco levado vira tique.
+	var g := _lutador()
+	for papel in ["hit_light", "hit_heavy", "stagger", "knockout", "taunt_weak", "get_up"]:
+		if not g._animacoes.has(papel):
+			continue
+		var anim := (g._animador as AnimationPlayer).get_animation(g._animacoes[papel])
+		_ok(anim.loop_mode == Animation.LOOP_NONE, "o gesto %s não pode se repetir" % papel)
+	g.free()
+
+## A REAÇÃO DURA O QUE A ANIMAÇÃO DURA.
+##
+## As durações eram uma tabela escrita à mão, e TODAS curtas: `stagger`
+## anotado como 1,35 s dura 1,53; `taunt_weak` anotado como 1,18 dura
+## 1,40. O relógio acabava antes do gesto e a volta para a guarda
+## começava no meio do movimento. E como `bater` toca mais rápido ou mais
+## devagar conforme a força, nenhuma tabela fixa poderia ter acertado.
+func _test_a_reacao_dura_o_que_a_animacao_dura() -> void:
+	var l := _lutador()
+	var ap: AnimationPlayer = l._animador
+	if ap == null:
+		l.free()
+		return
+	for papel in ["hit_light", "hit_medium", "hit_heavy", "stagger", "taunt_weak"]:
+		if not l._animacoes.has(papel):
+			continue
+		var comprimento := ap.get_animation(l._animacoes[papel]).length
+		_perto(l._duracao(papel, 1.0), comprimento, 0.001,
+			"a duração de %s tem de sair da animação" % papel)
+	# Tocada mais rápido, a reação acaba antes — e o controlador precisa
+	# saber disso, senão fica esperando parado no fim do gesto.
+	_ok(l._duracao("stagger", 1.10) < l._duracao("stagger", 1.0),
+		"a duração tem de acompanhar a velocidade de reprodução")
+	# E um papel que não existe no arquivo ainda tem um tempo razoável:
+	# um GLB incompleto não pode travar o lutador para sempre.
+	var ausente := l._duracao("nao_existe_este_papel", 1.0)
+	_ok(ausente > 0.2 and ausente < 3.0, "papel ausente precisa de uma duração de reserva")
+	l.free()
 
 func _test_o_dano_soma_e_nao_passa_de_um() -> void:
 	var l := _lutador()
@@ -218,9 +281,20 @@ func _test_a_arena_so_liga_nas_telas_do_soco() -> void:
 		_ok(jogo._arena_no_ar() == esperado[estado], "arena ligada no estado %d" % estado)
 	# Na tabela de recordes a moldura já saiu da tela: manter o mundo 3D
 	# desenhando ali é gastar uma TV Box por nada.
+	#
+	# A TABELA É O FIM DA RODADA, e não um relógio solto: quem ainda tem
+	# soco a dar continua vendo a arena. Enquanto a revelação começava no
+	# mesmo instante em que o segundo soco era armado, os dois casos
+	# davam no mesmo e ninguém precisou escolher; encurtar a revelação
+	# separou os relógios. Ver `_tabela_no_ar`.
 	jogo.state = GameDef.State.RESULT
 	jogo.verdict_time = 3.0
+	jogo.socos = [{"pontos": 5000, "velocidade": 3.0, "pico_g": 0.0, "duracao_ms": 9.0, "simulado": true}]
+	_ok(jogo._arena_no_ar(), "no meio da rodada a arena continua no ar")
+	jogo.rodada_encerrada_antecipadamente = true
 	_ok(not jogo._arena_no_ar(), "a arena desliga quando a tabela de recordes entra")
+	jogo.socos = []
+	jogo.rodada_encerrada_antecipadamente = false
 	jogo.verdict_time = -1.0
 	jogo.central_aberta = true
 	jogo.state = GameDef.State.ARMED

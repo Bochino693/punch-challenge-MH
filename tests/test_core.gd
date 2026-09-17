@@ -7,12 +7,14 @@ extends SceneTree
 func _initialize() -> void:
 	_test_escala_e_niveis()
 	_test_curva_monotonica()
+	_test_ancoras_da_curva()
 	_test_zona_morta_e_teto()
 	_test_progressao_sensor()
 	_test_migracao_acontece_uma_vez()
 	_test_top20_guarda_vinte_e_a_foto_certa()
 	_test_comemoracoes_do_ranking_sao_diferentes()
 	_test_statistics()
+	_test_ritmo()
 	_test_calibracao()
 	# ---------------------------------------------- as fitas de LED
 	# O quinto campo do CONFIG e o teto das fitas, e ele e OPCIONAL nos
@@ -90,49 +92,112 @@ func _test_escala_e_niveis() -> void:
 func _test_curva_monotonica() -> void:
 	var vmin := ScoreCurve.DEFAULT_MIN_SPEED
 	var vmax := ScoreCurve.DEFAULT_MAX_SPEED
-	var g := ScoreCurve.DEFAULT_EXPONENT
+	var k := ScoreCurve.DEFAULT_CONTRASTE
 	var dz := ScoreCurve.DEFAULT_DEAD_ZONE
-	var anterior := -1
-	# Passo fino, e além do teto: um soco mais forte NUNCA pode valer menos.
-	for i in range(0, 2001):
-		var v := float(i) * 0.02
-		var pts := ScoreCurve.points_from_speed(v, vmin, vmax, g, dz)
-		assert(pts >= anterior)
-		assert(pts >= 0 and pts <= GameDef.SCORE_MAX)
-		anterior = pts
-	# Monotônica também em relação ao expoente: mais dificuldade, nunca
-	# mais pontos, para a mesma velocidade.
+	# Passo fino, e além do teto: um soco mais forte NUNCA pode valer
+	# menos. Vale para qualquer âncora e qualquer contraste — é a única
+	# promessa que uma máquina de soco não pode quebrar nem uma vez.
+	for ref_fracao in [0.25, 0.45, 0.55, 0.78]:
+		for contraste in [ScoreCurve.CONTRASTE_MIN, 1.0, k, ScoreCurve.CONTRASTE_MAX]:
+			var ref: float = lerpf(vmin, vmax, ref_fracao)
+			var anterior := -1
+			for i in range(0, 2001):
+				var v := float(i) * 0.02
+				var pts := ScoreCurve.points_from_speed(v, vmin, vmax, contraste, dz, ref)
+				assert(pts >= anterior)
+				assert(pts >= 0 and pts <= GameDef.SCORE_MAX)
+				anterior = pts
+
+	# A DIFICULDADE É O SOCO DE REFERÊNCIA, e ela é monotônica: exigir
+	# mais velocidade para pagar meio placar nunca pode render MAIS
+	# pontos na mesma velocidade. É o que torna o ajuste defensável.
 	var meio := (vmin + vmax) * 0.5
-	var facil := ScoreCurve.points_from_speed(meio, vmin, vmax, 1.5, dz)
-	var duro := ScoreCurve.points_from_speed(meio, vmin, vmax, 4.5, dz)
-	assert(facil >= duro)
+	var facil := ScoreCurve.points_from_speed(meio, vmin, vmax, k, dz, lerpf(vmin, vmax, 0.35))
+	var normal := ScoreCurve.points_from_speed(meio, vmin, vmax, k, dz, lerpf(vmin, vmax, 0.55))
+	var duro := ScoreCurve.points_from_speed(meio, vmin, vmax, k, dz, lerpf(vmin, vmax, 0.78))
+	assert(facil > normal)
+	assert(normal > duro)
+	assert(ScoreCurve.difficulty_name(vmin, vmax, lerpf(vmin, vmax, 0.30)) == "FÁCIL")
+	assert(ScoreCurve.difficulty_name(vmin, vmax, lerpf(vmin, vmax, 0.55)) == "NORMAL")
+	assert(ScoreCurve.difficulty_name(vmin, vmax, lerpf(vmin, vmax, 0.78)) == "IMPLACÁVEL")
+
 	# A amostragem que a Central desenha também é monotônica.
-	var curva := ScoreCurve.amostrar(vmin, vmax, g, dz, 60)
+	var curva := ScoreCurve.amostrar(vmin, vmax, k, dz, 60)
 	var ultimo := -1.0
 	for ponto in curva:
 		assert((ponto as Vector2).y >= ultimo)
 		ultimo = (ponto as Vector2).y
 
+## A PROMESSA DAS TRÊS ÂNCORAS, que é o contrato inteiro da mecânica.
+##
+## Se alguma destas quebrar, "o soco médio paga 5000" deixa de ser uma
+## frase que se pode dizer ao dono da máquina — e era exatamente a falta
+## dessa frase que fazia a regulagem antiga ser adivinhação.
+func _test_ancoras_da_curva() -> void:
+	var vmin := ScoreCurve.DEFAULT_MIN_SPEED
+	var vmax := ScoreCurve.DEFAULT_MAX_SPEED
+	for ref_fracao in [0.25, 0.35, 0.45, 0.55, 0.70, 0.78]:
+		for contraste in [ScoreCurve.CONTRASTE_MIN, 1.0, 1.15, ScoreCurve.CONTRASTE_MAX]:
+			var ref: float = lerpf(vmin, vmax, ref_fracao)
+			# 1. O soco de referência paga exatamente meio placar,
+			#    qualquer que seja o contraste.
+			var no_ref := ScoreCurve.points_from_speed(ref, vmin, vmax, contraste, 0.0, ref)
+			assert(absi(no_ref - ScoreCurve.PONTOS_DE_REFERENCIA) <= 2)
+			# 2. O piso é zero e o teto é o teto.
+			assert(ScoreCurve.points_from_speed(vmin, vmin, vmax, contraste, 0.0, ref) == 0)
+			assert(
+				ScoreCurve.points_from_speed(vmax, vmin, vmax, contraste, 0.0, ref)
+				== GameDef.SCORE_MAX
+			)
+	# 3. O CONTRASTE NÃO MEXE NA DIFICULDADE MÉDIA: ele espalha em volta
+	#    da referência. Abaixo dela, mais contraste dá menos; acima dela,
+	#    mais. Se os dois lados andassem juntos, o botão seria um segundo
+	#    botão de dificuldade disfarçado — e dois botões para a mesma
+	#    coisa é como eles acabam discordando.
+	var ref_meio: float = lerpf(vmin, vmax, 0.55)
+	var abaixo: float = lerpf(vmin, ref_meio, 0.5)
+	var acima: float = lerpf(ref_meio, vmax, 0.5)
+	assert(
+		ScoreCurve.points_from_speed(abaixo, vmin, vmax, 1.6, 0.0, ref_meio)
+		< ScoreCurve.points_from_speed(abaixo, vmin, vmax, 0.8, 0.0, ref_meio)
+	)
+	assert(
+		ScoreCurve.points_from_speed(acima, vmin, vmax, 1.6, 0.0, ref_meio)
+		> ScoreCurve.points_from_speed(acima, vmin, vmax, 0.8, 0.0, ref_meio)
+	)
+	# 4. UM SOCO COMUM TEM DE LER COMO SOCO. Era esta a queixa: a curva
+	#    antiga pagava 974 a 35% da faixa, e "mil" lê como máquina que
+	#    não registrou. Com as âncoras, a mesma velocidade paga bem mais
+	#    de dois mil — e continua longe do topo.
+	var comum: float = lerpf(vmin, vmax, 0.35)
+	var nota := ScoreCurve.points_from_speed(comum, vmin, vmax)
+	assert(nota > 2000)
+	assert(nota < 4000)
+	# 5. E UM SOCO FORTE TEM DE LER COMO FORTE, sem ser 9999.
+	var forte: float = lerpf(vmin, vmax, 0.85)
+	assert(GameDef.faixa_de(ScoreCurve.points_from_speed(forte, vmin, vmax)) == GameDef.Faixa.FORTE)
+	assert(ScoreCurve.points_from_speed(forte, vmin, vmax) < GameDef.SCORE_MAX)
+
 func _test_zona_morta_e_teto() -> void:
 	var vmin := ScoreCurve.DEFAULT_MIN_SPEED
 	var vmax := ScoreCurve.DEFAULT_MAX_SPEED
-	var g := ScoreCurve.DEFAULT_EXPONENT
-	var dz := ScoreCurve.DEFAULT_DEAD_ZONE
+	var k := ScoreCurve.DEFAULT_CONTRASTE
+	var dz := 0.08
 	# Abaixo e no piso: zero. Dentro da zona morta: ainda zero.
-	assert(ScoreCurve.points_from_speed(0.0, vmin, vmax, g, dz) == 0)
-	assert(ScoreCurve.points_from_speed(vmin, vmin, vmax, g, dz) == 0)
+	assert(ScoreCurve.points_from_speed(0.0, vmin, vmax, k, dz) == 0)
+	assert(ScoreCurve.points_from_speed(vmin, vmin, vmax, k, dz) == 0)
 	var span := vmax - vmin
-	assert(ScoreCurve.points_from_speed(vmin + span * dz * 0.5, vmin, vmax, g, dz) == 0)
-	assert(ScoreCurve.points_from_speed(vmin + span * dz, vmin, vmax, g, dz) == 0)
-	# Logo acima da zona morta a nota ainda é desprezível — é o expoente
-	# fazendo o seu trabalho — mas na metade da escala já existe placar.
-	assert(ScoreCurve.points_from_speed(vmin + span * 0.5, vmin, vmax, g, dz) > 0)
-	# 9999 SÓ no teto. Uma pancada comum, mesmo forte, não chega lá.
-	assert(ScoreCurve.points_from_speed(vmax, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
-	assert(ScoreCurve.points_from_speed(vmax * 2.0, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
-	assert(ScoreCurve.points_from_speed(vmax - 0.01, vmin, vmax, g, dz) < GameDef.SCORE_MAX)
-	assert(ScoreCurve.points_from_speed(vmax * 0.90, vmin, vmax, g, dz) < GameDef.SCORE_MAX)
-	assert(ScoreCurve.points_from_speed(vmax * 0.75, vmin, vmax, g, dz) < 9000)
+	assert(ScoreCurve.points_from_speed(vmin + span * dz * 0.5, vmin, vmax, k, dz) == 0)
+	assert(ScoreCurve.points_from_speed(vmin + span * dz, vmin, vmax, k, dz) == 0)
+	# Passada a zona morta, a nota existe e cresce.
+	assert(ScoreCurve.points_from_speed(vmin + span * (dz + 0.02), vmin, vmax, k, dz) > 0)
+	assert(ScoreCurve.points_from_speed(vmin + span * 0.5, vmin, vmax, k, dz) > 0)
+	# 9999 SÓ no teto — esta é a garantia que faz o topo valer alguma
+	# coisa, e ela não mudou com a curva nova.
+	assert(ScoreCurve.points_from_speed(vmax, vmin, vmax, k, dz) == GameDef.SCORE_MAX)
+	assert(ScoreCurve.points_from_speed(vmax * 2.0, vmin, vmax, k, dz) == GameDef.SCORE_MAX)
+	assert(ScoreCurve.points_from_speed(vmax - 0.01, vmin, vmax, k, dz) < GameDef.SCORE_MAX)
+	assert(ScoreCurve.points_from_speed(vmax * 0.90, vmin, vmax, k, dz) < GameDef.SCORE_MAX)
 
 # ------------------------------------------------------------ ranking
 func _test_progressao_sensor() -> void:
@@ -142,16 +207,34 @@ func _test_progressao_sensor() -> void:
 		var pontos := ScoreCurve.points_from_speed(velocidade, 0.3, 5.2)
 		assert(pontos > anterior)
 		anterior = pontos
-	# A dificuldade depende da fração calibrada, não de um teto fixo de 5.
+	# A ESCALA É RELATIVA À FAIXA CALIBRADA, e não a um teto fixo: a
+	# mesma fração da faixa paga a mesma nota numa máquina que mede até
+	# 1,2 m/s e noutra que mede até 16.
+	var referencia := -1
 	for teto in [1.2, 2.4, 5.2, 16.0]:
-		assert(is_equal_approx(ScoreCurve.sanitize(0.3, teto, 2.2, 0.0)["max_speed"], teto))
-		assert(ScoreCurve.points_from_speed(lerpf(0.3, teto, 0.90), 0.3, teto) < 8000)
-		assert(ScoreCurve.points_from_speed(lerpf(0.3, teto, 0.95), 0.3, teto) > 8000)
+		assert(is_equal_approx(
+			ScoreCurve.sanitize(0.3, teto, ScoreCurve.DEFAULT_CONTRASTE, 0.0)["max_speed"], teto
+		))
+		var a_noventa := ScoreCurve.points_from_speed(lerpf(0.3, teto, 0.90), 0.3, teto)
+		if referencia < 0:
+			referencia = a_noventa
+		assert(absi(a_noventa - referencia) <= 2)
+		# Noventa por cento da faixa é NOCAUTE para cima — um soco assim
+		# merece ser comemorado —, e mesmo assim não é o topo.
+		assert(a_noventa >= 8000)
+		assert(a_noventa < GameDef.SCORE_MAX)
 		assert(ScoreCurve.points_from_speed(teto, 0.3, teto) == 9999)
-	var cfg := Calibracao.sugerir([0.3, 0.35, 0.4, 0.45, 0.5],
-		[1.0, 1.1, 1.2, 1.25, 1.3], [3.0, 4.0, 8.0, 12.0, 15.0], 0.3)
-	assert(float(cfg["vmax"]) < 1.5)
-	assert(ScoreCurve.points_from_speed(1.3, cfg["vmin"], cfg["vmax"]) > 8000)
+	# Uma montagem lenta (saco pesado, palheta larga) continua entregando
+	# a escala inteira: o teto dela é 9999 como o de qualquer outra.
+	var cfg := Calibracao.sugerir(
+		[0.3, 0.35, 0.4, 0.45, 0.5], [1.0, 1.1, 1.2, 1.25, 1.3], 0.3
+	)
+	assert(float(cfg["vmax"]) < 1.8)
+	assert(float(cfg["vmin"]) < float(cfg["vref"]))
+	assert(float(cfg["vref"]) < float(cfg["vmax"]))
+	assert(ScoreCurve.points_from_speed(
+		float(cfg["vref"]), cfg["vmin"], cfg["vmax"], ScoreCurve.DEFAULT_CONTRASTE, 0.0, cfg["vref"]
+	) >= ScoreCurve.PONTOS_DE_REFERENCIA - 2)
 
 func _test_migracao_acontece_uma_vez() -> void:
 	# Arquivo antigo, escala 0 a 999, sem versão gravada.
@@ -216,6 +299,97 @@ func _test_statistics() -> void:
 	assert(int(summary["best"]) == 8000)
 	assert(int(summary["top5_entries"]) == 1)
 
+# --------------------------------------------------------------- ritmo
+## O PASSO DO JOGO. Ver `scripts/ritmo.gd` para o defeito que ele
+## conserta; aqui ficam as três promessas que ele faz, porque nenhuma
+## delas dá para conferir olhando a tela: um movimento trêmulo e um
+## movimento liso parecem a mesma coisa num print.
+func _test_ritmo() -> void:
+	var r := Ritmo.new()
+	var quadro := 1.0 / 60.0
+
+	# 1. O RUÍDO DESAPARECE. Entrando um relógio que chacoalha alguns
+	#    décimos de milissegundo em volta do quadro de tela — que é o que
+	#    um PC folgado entrega —, o passo sai constante. É esta trepidação,
+	#    e não a queda de quadros, que o olho lê como "não natural".
+	var ruidosos := [0.0167, 0.0182, 0.0151, 0.0167, 0.0179, 0.0155, 0.0167, 0.0171]
+	for volta in range(3):
+		for d in ruidosos:
+			r.passo(d)
+	var maior := 0.0
+	var menor := 1.0
+	for d in ruidosos:
+		var p := r.passo(d)
+		maior = maxf(maior, p)
+		menor = minf(menor, p)
+	# O espalhamento na entrada é de 3,1 ms. Medido, o de saída fica em
+	# torno de 0,7 ms — o limite aqui é folgado de propósito, porque o
+	# que este teste guarda é "melhorou muito", não um número exato que
+	# qualquer ajuste fino da janela quebraria sem nada ter piorado.
+	assert(maior - menor < 0.0015)
+
+	# 1b. O CASO QUE MAIS IMPORTA: o vsync alternando 60/30/60/30 numa
+	#     máquina que não fecha o quadro a tempo. A entrada salta 16,7 ms
+	#     entre um quadro e o seguinte — o dobro de duração —, e é esse
+	#     salto que vira solavanco na tela. É o modo de falhar normal de
+	#     um PC fraco, e nenhum teto de delta jamais o pegou.
+	var rv := Ritmo.new()
+	var alterna: Array[float] = []
+	for i in range(24):
+		alterna.append(quadro if i % 2 == 0 else quadro * 2.0)
+	for d in alterna:
+		rv.passo(d)
+	var v_maior := 0.0
+	var v_menor := 1.0
+	for d in alterna:
+		var p := rv.passo(d)
+		v_maior = maxf(v_maior, p)
+		v_menor = minf(v_menor, p)
+	# De 16,7 ms de salto para menos de 3: o movimento deixa de pular.
+	assert(v_maior - v_menor < 0.003)
+
+	# 2. O SOLUÇO NÃO VIRA UM PULO. Um quadro de meio segundo — a
+	#    primeira fonte sendo rasterizada, o sistema engasgando — não
+	#    pode fazer o jogo inteiro andar meio segundo de uma vez, com a
+	#    contagem saltando números.
+	var r2 := Ritmo.new()
+	for i in range(8):
+		r2.passo(quadro)
+	assert(r2.passo(0.75) < Ritmo.PASSO_MAXIMO)
+	assert(r2.passo(0.75) < 0.05)
+
+	# 3. SUAVIZAR NÃO É ATRASAR. Uma média sozinha deixaria o relógio do
+	#    jogo para trás do relógio de verdade, para sempre — e atraso
+	#    acumulado é como uma contagem de três segundos passa a durar
+	#    três segundos e meio. A dívida devolve o que a média segurou.
+	var r3 := Ritmo.new()
+	var real := 0.0
+	var jogo := 0.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260917
+	for i in range(1200):
+		var d := quadro * rng.randf_range(0.88, 1.16)
+		real += d
+		jogo += r3.passo(d)
+	# Vinte segundos de jogo com menos de um quadro de diferença.
+	assert(absf(jogo - real) < quadro)
+
+	# 4. NENHUMA ENTRADA ABSURDA PODE CONGELAR A MÁQUINA.
+	#
+	#    Zero, negativo, um centésimo de milissegundo, dez segundos: em
+	#    todos o passo tem de continuar sendo um passo de jogo. O caso do
+	#    quadro quase-zero foi um defeito de verdade deste módulo — ele
+	#    entrava na média e deixava o relógio preso no piso do `clampf`,
+	#    com o jogo desenhando e nada se movendo. Parece travamento, e é
+	#    o tipo de coisa que ninguém consegue relatar direito.
+	var r4 := Ritmo.new()
+	for d in [0.0, -1.0, 0.00001, 10.0, 1e12, -1e12]:
+		var p := r4.passo(d)
+		assert(p >= Ritmo.PISO_DO_QUADRO * 0.5)
+		assert(p <= Ritmo.PASSO_MAXIMO)
+	# E depois do absurdo ele volta ao normal no primeiro quadro bom.
+	assert(absf(r4.passo(quadro) - quadro) < 0.002)
+
 # ------------------------------------------------------------ calibração
 func _test_calibracao() -> void:
 	assert(is_equal_approx(Calibracao.percentil([1.0, 2.0, 3.0], 0.5), 2.0))
@@ -226,32 +400,90 @@ func _test_calibracao() -> void:
 
 	var fracos := [2.4, 2.0, 3.1, 2.2, 2.6]
 	var fortes := [11.0, 12.5, 13.9, 12.1, 11.6]
-	var picos := [4.0, 5.2, 9.8, 4.6, 10.4, 11.0, 9.1, 12.3, 10.0, 9.4]
-	var s := Calibracao.sugerir(fracos, fortes, picos, 0.6)
+	var s := Calibracao.sugerir(fracos, fortes, 0.6)
 	# O piso sai ABAIXO do golpe fraco típico, e o teto ACIMA do forte
 	# típico: quem bate fraco vê algum ponto, e 9999 continua raro.
 	assert(float(s["vmin"]) < 2.4)
 	assert(float(s["vmax"]) > 12.5)
-	assert(float(s["amin"]) > 0.6)
+	# A REFERÊNCIA CAI ENTRE AS DUAS DEMONSTRAÇÕES, e não em cima de
+	# nenhuma delas: é a média do salão, não a do técnico.
+	assert(float(s["vref"]) > 2.6)
+	assert(float(s["vref"]) < 11.0)
 	assert(Calibracao.pronta(fracos, fortes))
 	assert(not Calibracao.pronta([1.0], fortes))
+
+	# O GOLPE FORTE DA CALIBRAÇÃO NÃO PODE JÁ SER 9999. Um teto que o
+	# próprio técnico encosta na primeira noite deixa de ser teto — e era
+	# nisso que a folga de 8% ia dar com a curva nova.
+	var forte_tipico := Calibracao.percentil(fortes, 0.5)
+	var nota_do_forte := ScoreCurve.points_from_speed(
+		forte_tipico, s["vmin"], s["vmax"], ScoreCurve.DEFAULT_CONTRASTE, 0.0, s["vref"]
+	)
+	assert(nota_do_forte >= 7500)
+	assert(nota_do_forte < 9700)
 
 	# UM GOLPE ESCAPADO NÃO PODE MANDAR NA CALIBRAÇÃO. Com um forte
 	# ridículo e um fraco absurdo no meio, os percentis seguram.
 	var sujo_fracos := [2.4, 2.0, 3.1, 2.2, 9.9]
 	var sujo_fortes := [11.0, 12.5, 1.2, 12.1, 11.6]
-	var t := Calibracao.sugerir(sujo_fracos, sujo_fortes, picos, 0.6)
+	var t := Calibracao.sugerir(sujo_fracos, sujo_fortes, 0.6)
 	assert(float(t["vmin"]) < 3.0)
 	assert(float(t["vmax"]) > 10.0)
 
 	# Se os dois grupos saírem parecidos, a escala não pode colapsar.
-	var iguais := Calibracao.sugerir([6.0, 6.1, 6.0, 5.9, 6.0], [6.2, 6.1, 6.3, 6.0, 6.2], picos, 0.4)
+	var iguais := Calibracao.sugerir([6.0, 6.1, 6.0, 5.9, 6.0], [6.2, 6.1, 6.3, 6.0, 6.2], 0.4)
 	assert(float(iguais["vmax"]) - float(iguais["vmin"]) >= 0.5)
-	# E a sugestão sempre sai dentro dos limites que a Central aceita.
+	# E a sugestão sempre sai dentro dos limites que a Central aceita —
+	# as três âncoras, e não só as duas pontas.
 	for caso in [s, t, iguais]:
 		var cfg := ScoreCurve.sanitize(
 			float(caso["vmin"]), float(caso["vmax"]),
-			ScoreCurve.DEFAULT_EXPONENT, ScoreCurve.DEFAULT_DEAD_ZONE
+			ScoreCurve.DEFAULT_CONTRASTE, ScoreCurve.DEFAULT_DEAD_ZONE, float(caso["vref"])
 		)
 		assert(is_equal_approx(cfg["min_speed"], float(caso["vmin"])))
 		assert(is_equal_approx(cfg["max_speed"], float(caso["vmax"])))
+		assert(is_equal_approx(cfg["ref_speed"], float(caso["vref"])))
+
+	_test_pulso_minimo()
+
+## O PULSO MÍNIMO, QUE ERA O DEFEITO MAIS CARO DA REGULAGEM.
+##
+## A sugestão devolvia gravidades num campo que o firmware lê em
+## milissegundos. Como pulso mínimo é um TETO DE VELOCIDADE ao contrário,
+## o número errado não deixava a máquina insensível — deixava-a cega
+## justamente para os socos fortes, que é o sintoma mais difícil de
+## atribuir à causa certa.
+func _test_pulso_minimo() -> void:
+	# A conta é geometria pura: largura da palheta dividida pela
+	# velocidade que ainda se aceita como soco.
+	var pulso := ArduinoProtocol.pulso_minimo_ms(0.020, 5.2)
+	var janela := ArduinoProtocol.janela_medivel(0.020, pulso)
+	assert(is_equal_approx(janela.y, ArduinoProtocol.velocidade_teto(5.2)))
+
+	# O TETO DO JOGO E O TETO DO FIRMWARE TROPEÇAM NO MESMO SOCO. Eram
+	# duas regras para a mesma ideia, e a mais apertada vencia calada.
+	for vmax in [1.2, 2.4, 5.2, 12.0, 20.0]:
+		var ms := ArduinoProtocol.pulso_minimo_ms(0.020, vmax)
+		var j := ArduinoProtocol.janela_medivel(0.020, ms)
+		assert(is_equal_approx(j.y, ArduinoProtocol.velocidade_teto(vmax)))
+		# E o teto calibrado sempre cabe dentro do que o sensor mede: se
+		# não coubesse, a máquina recusaria como CURTO todo soco capaz
+		# de tirar 9999 — o soco que ela existe para premiar.
+		assert(j.y > vmax)
+
+	# PALHETA MAIS LARGA, PULSO MAIS LONGO. Quem trocar a palheta sem
+	# refazer a conta teria a faixa inteira deslocada.
+	assert(
+		ArduinoProtocol.pulso_minimo_ms(0.040, 5.2)
+		> ArduinoProtocol.pulso_minimo_ms(0.020, 5.2)
+	)
+	# E a sugestão do assistente entrega o mesmo número que a conta —
+	# uma fonte só, nunca duas que podem divergir.
+	var sug := Calibracao.sugerir([2.0, 2.2, 2.4], [10.0, 11.0, 12.0], 0.2, 0.030)
+	assert(is_equal_approx(
+		float(sug["pulso_ms"]),
+		ArduinoProtocol.pulso_minimo_ms(0.030, float(sug["vmax"]))
+	))
+	# O campo `amin` em gravidades NÃO VOLTA. Se ele reaparecer, alguém
+	# religou o caminho que estrangulava a máquina.
+	assert(not sug.has("amin"))

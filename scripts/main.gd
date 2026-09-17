@@ -95,11 +95,14 @@ const LADO_BOTAO := 64.0
 const PASSOS := {
 	"vmin": Rect2(110, 404, 400, LADO_BOTAO),
 	"vmax": Rect2(570, 404, 400, LADO_BOTAO),
-	"curva": Rect2(110, 526, 400, 58),
-	"zona": Rect2(570, 526, 400, 58),
+	# O SOCO DE REFERÊNCIA FICA LOGO ABAIXO DO PISO E DO TETO: ele é a
+	# terceira âncora da mesma escala, e lê-lo longe das outras duas era
+	# o que fazia a dificuldade parecer um ajuste à parte em vez do meio
+	# da régua que ela é.
+	"referencia": Rect2(110, 526, 400, 58),
+	"curva": Rect2(570, 526, 400, 58),
 	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
-	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
@@ -146,8 +149,8 @@ const BOTOES_SIMPLES := {
 const PAGINA_DO_CONTROLE := {
 	"fechar": -1, "padroes": -1, "salvar": -1,
 	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0,
-	"vmin": 1, "vmax": 1, "curva": 1, "zona": 1,
-	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
+	"vmin": 1, "vmax": 1, "referencia": 1, "curva": 1,
+	"porta": 1, "eixo": 1, "raio": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
 	"espelhar_camera": 2, "sondar_camera": 2, "instalar_camera": 2, "diagnosticar": 2,
@@ -176,13 +179,20 @@ var ranking: Array[Dictionary] = []
 ## Faixa de velocidade (m/s) que vira pontos no placar.
 var hit_min_speed := ScoreCurve.DEFAULT_MIN_SPEED
 var hit_max_speed := ScoreCurve.DEFAULT_MAX_SPEED
-## O expoente é o botão de dificuldade da casa: quanto maior, mais tarde
-## a nota sobe e mais raro fica o topo da escala. Os oito níveis têm
-## faixas FIXAS, então é aqui — e só aqui — que se decide quanta gente
-## chega a cada um deles.
-var score_exponent := ScoreCurve.DEFAULT_EXPONENT
+## O SOCO DE REFERÊNCIA — o botão de dificuldade da casa.
+##
+## É a velocidade que paga exatamente 5000 pontos, metade do placar. Os
+## oito níveis têm faixas FIXAS, então é aqui — e só aqui — que se decide
+## quanta gente chega a cada um deles. Subir este número é dizer "aqui
+## tem de bater mais forte para tirar meio placar", que é uma frase
+## defensável na frente do cliente; o expoente que ocupava este lugar
+## não era. Ver `ScoreCurve`.
+var score_ref_speed := ScoreCurve.REFERENCIA_AUTOMATICA
+## Quanto a nota se espalha ENTRE as três âncoras. Não mexe em nenhuma
+## delas: um soco de referência paga 5000 com qualquer contraste.
+var score_contraste := ScoreCurve.DEFAULT_CONTRASTE
 var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
-## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,amin).
+## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,pulso_ms).
 var sensor_eixo := "A"
 var sensor_raio := 0.020
 ## O PISO QUE O JOGO MANDA À PLACA É O MESMO PISO DA PONTUAÇÃO.
@@ -232,10 +242,23 @@ var ajustes_do_sensor_zerados := false
 const ESCALA_DO_SENSOR := 10
 ## Evolui a dificuldade sem apagar eixo, raio e gatilho físicos já
 ## calibrados no gabinete.
-const ESQUEMA_DA_PONTUACAO := 3
+##
+## O 4 é a curva ancorada. A 3 guardava um `score_exponent` de 1,5 a 4,5,
+## que nesta versão não quer dizer mais nada: o campo de mesmo espírito
+## agora é o contraste, de 0,70 a 1,80, e a dificuldade virou uma
+## VELOCIDADE. Ler o número antigo como se fosse o novo entregaria uma
+## máquina saturada no contraste máximo sem ninguém ter pedido, então a
+## migração descarta os dois e recalcula a partir da faixa medida — que
+## essa sim continua válida, porque foi medida no gabinete.
+const ESQUEMA_DA_PONTUACAO := 4
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
-var sensor_amin := 0.70
+## O PULSO MÍNIMO EM MILISSEGUNDOS que a placa recebe no CONFIG.
+##
+## Ele NÃO é escolhido: sai da largura da palheta e do teto calibrado,
+## em `_aplicar_faixas`. Ver `ArduinoProtocol.pulso_minimo_ms` para o
+## estrago que a escolha à mão causava.
+var sensor_pulso_ms := ArduinoProtocol.pulso_minimo_ms(0.020, ScoreCurve.DEFAULT_MAX_SPEED)
 ## Porta serial configurada; "" = automática (primeira disponível).
 var porta_configurada := ""
 ## O par que efetivamente chegou ao MPU neste computador. É preferência,
@@ -282,6 +305,18 @@ var rodada_encerrada_antecipadamente := false
 ## propósito: quando a tela diz "SOQUE", a placa já está pronta. Pedir um
 ## soco que seria descartado é a pior coisa que esta máquina pode fazer.
 const ESPERA_PARA_O_PROXIMO_SOCO := 2.5
+
+## QUANTO O VEREDITO FICA SOZINHO ANTES DE A TABELA ENTRAR.
+##
+## Eram 2,5 s ESCRITOS QUATRO VEZES, em quatro lugares que precisam
+## concordar: o que solta o som do ranking, o que desliga a arena 3D, o
+## que troca o desenho da tela e o que dá partida no relógio dos atos.
+## Quatro cópias do mesmo número é como três delas acabam mudando e uma
+## não — e nesse dia a arena continua sendo desenhada por baixo da
+## tabela, ou o som do ranking toca meio segundo antes da tabela existir.
+##
+## O valor também encolheu, junto com os três atos abaixo. Ver lá.
+const ESPERA_DO_RANKING := 1.15
 ## Os socos desta rodada, na ordem em que aconteceram.
 ## Cada item preserva pontos e também as medidas cruas que os explicam.
 var socos: Array = []
@@ -564,6 +599,8 @@ var arena_nocaute := false
 var arena_semente := 0
 
 var fx := PunchFX.new()
+## O RELÓGIO DO JOGO. Ver `Ritmo` para o que ele conserta e por quê.
+var ritmo := Ritmo.new()
 ## O VIGIA DO RITMO. Mede o quadro e, quando a máquina não dá conta,
 ## manda os efeitos gastarem menos — sozinho, sem ninguém configurar.
 var desempenho := Desempenho.new()
@@ -679,12 +716,12 @@ func _montar_arena() -> void:
 ## imagem escondida, é uma imagem que não chega a ser calculada. Numa TV
 ## Box isso é a diferença entre o mundo 3D custar o dia inteiro e custar
 ## só os segundos em que alguém está olhando para ele. A tabela de
-## recordes (`verdict_time >= 2.5`) e a Central também não o querem: ali
+## recordes (`ESPERA_DO_RANKING`) e a Central também não o querem: ali
 ## a moldura já saiu da tela.
 func _arena_no_ar() -> bool:
 	if central_aberta or intro_active:
 		return false
-	if state == GameDef.State.RESULT and verdict_time >= 2.5:
+	if _tabela_no_ar():
 		return false
 	return state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED, GameDef.State.MEASURING, GameDef.State.RESULT]
 
@@ -708,11 +745,40 @@ func _exit_tree() -> void:
 ## que a Central desenha, que o placar usa e que o firmware recebe. Uma
 ## passagem só por `ScoreCurve.sanitize` mantém as três concordando.
 func _aplicar_faixas() -> void:
-	var cfg := ScoreCurve.sanitize(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone)
+	var cfg := ScoreCurve.sanitize(
+		hit_min_speed, hit_max_speed, score_contraste, score_dead_zone, score_ref_speed
+	)
 	hit_min_speed = cfg["min_speed"]
 	hit_max_speed = cfg["max_speed"]
-	score_exponent = cfg["exponent"]
+	score_contraste = cfg["contraste"]
 	score_dead_zone = cfg["dead_zone"]
+	score_ref_speed = cfg["ref_speed"]
+	# O PULSO MÍNIMO É CONSEQUÊNCIA, NÃO ESCOLHA.
+	#
+	# Ele é o único ajuste do sensor que não descreve a montagem: descreve
+	# o que a montagem IMPLICA. Largura da palheta e teto de velocidade
+	# são medidos; o pulso sai deles por divisão. Deixá-lo como um passo
+	# de − e + ao lado dos outros foi o que permitiu que a calibração
+	# escrevesse gravidades num campo de milissegundos e estrangulasse a
+	# máquina em silêncio — ver `Calibracao`.
+	#
+	# Recalculando aqui, junto de toda mudança de faixa ou de palheta, o
+	# número nunca mais pode ficar para trás do resto da configuração.
+	sensor_pulso_ms = ArduinoProtocol.pulso_minimo_ms(sensor_raio, hit_max_speed)
+
+## O SOCO DE REFERÊNCIA EM m/s, sempre — nunca o zero que quer dizer
+## "automático".
+##
+## `score_ref_speed` guarda 0 enquanto ninguém escolheu, e nesse caso é a
+## curva que decide onde a âncora cai. Mas a tela precisa de um número
+## para desenhar, e o passo de − e + precisa de um número de onde partir:
+## os dois perguntam aqui e recebem exatamente o valor que a pontuação
+## vai usar. Uma fonte só evita a discórdia clássica — a Central
+## mostrando um número e o placar usando outro.
+func _referencia_efetiva() -> float:
+	return float(ScoreCurve.sanitize(
+		hit_min_speed, hit_max_speed, score_contraste, score_dead_zone, score_ref_speed
+	)["ref_speed"])
 
 ## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
 ## paralela — duas fontes para o mesmo número é como elas divergem.
@@ -749,36 +815,26 @@ func _process(delta: float) -> void:
 	SettingsStore.bombear()
 	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
-	# UM QUADRO ENGASGADO NÃO PODE VIRAR UM PULO NO JOGO — MAS O FREIO NÃO
-	# PODE VIRAR CÂMERA LENTA.
+	# O PASSO DO JOGO NÃO É MAIS O TEMPO CRU DO QUADRO.
 	#
-	# `desempenho.medir` já viu o quadro de verdade, com o tempo real que
-	# ele levou — é dele que sai a média de FPS e a decisão de cortar
-	# efeito. Este teto serve só para um caso raro: um engasgo isolado e
-	# GRANDE (a primeira vez que uma fonte nova é rasterizada, um soluço
-	# do sistema operacional) que faria o quadro seguinte herdar um delta
-	# gigante e o jogo INTEIRO pular esse tanto de uma vez — a contagem
-	# saltando números, a brasa teletransportando em vez de voar.
+	# Havia aqui um teto e mais nada: `minf(delta, 0.1)`. Ele resolvia o
+	# caso do soluço isolado — um quadro de meio segundo não vira meio
+	# segundo de jogo de uma vez — e não resolvia o caso que a queixa
+	# descrevia, que é outro e é o comum: o tempo do quadro CHACOALHA
+	# alguns décimos de milissegundo para cima e para baixo mesmo numa
+	# máquina folgada, e com vsync numa máquina apertada chacoalha entre
+	# 16,7 e 33,3 ms. Um teto não vê nada disso passar. O olho vê tudo,
+	# e chama de "movimento não natural".
 	#
-	# O teto tinha ficado em 1/30 s (a máquina "não pode ficar mais lenta
-	# que 30 fps"), e isso é OUTRA COISA: numa tela mais pesada de
-	# desenhar — a abertura, com o cenário inteiro e a luva voando, ou o
-	# instante do impacto, com a explosão de partículas — a máquina PODE
-	# rodar abaixo de 30 fps por um bom tempo, não só num quadro isolado.
-	# Com o teto em 1/30 s, cada um DESSES quadros também tinha o tempo
-	# cortado, e um jogo que anda com menos tempo do que o relógio real
-	# passou fica em câmera lenta — foi exatamente essa a queixa: a
-	# contagem do impacto e o posicionamento da abertura ficaram lentos.
-	# Um freio para casos raros e extremos não pode disparar toda vez que
-	# a tela fica mais pesada por alguns segundos.
+	# `Ritmo` faz as três coisas: descarta o soluço, encaixa o quadro no
+	# múltiplo do relógio da tela e suaviza o que sobrou com uma dívida
+	# limitada, para o jogo ficar liso SEM atrasar. A explicação inteira
+	# está lá, incluindo por que a média sozinha seria uma armadilha.
 	#
-	# O teto certo é bem mais alto: só entra numa queda catastrófica
-	# (abaixo de 10 fps, meio segundo por quadro pra cima), que nunca
-	# acontece pelo simples peso normal de uma tela cheia de efeito — só
-	# por um soluço de verdade. Abaixo disso o passo do jogo é o próprio
-	# tempo do quadro, e a máquina anda no seu próprio ritmo real, só mais
-	# aos trancos quando o PC está fraco — o que é honesto, e não lento.
-	var passo := minf(delta, 0.1)
+	# `desempenho.medir` continua recebendo o delta CRU, logo acima: um
+	# vigia que olhasse para o tempo já suavizado não enxergaria o
+	# engasgo que ele existe para combater.
+	var passo := ritmo.passo(delta)
 	# A serial recebe prioridade no começo do quadro. A câmera e a arena
 	# podem custar milissegundos; o evento físico não deve esperar por elas.
 	animation_time += passo
@@ -805,6 +861,17 @@ func _process(delta: float) -> void:
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
 	fx.atualizar(passo)
+	# O FUNDO ANDA NO RELÓGIO DO JOGO, e não num relógio próprio.
+	#
+	# Ele tinha o seu `_process`, com a sua conta de delta e o seu teto.
+	# Dois relógios para a mesma cena é como eles divergem: bastava um
+	# quadro engasgado cair de um lado e não do outro para a poeira do
+	# fundo andar um tanto e o resto da tela outro — e é justamente no
+	# fundo, com coisa se movendo devagar e em linha reta, que essa
+	# diferença aparece mais. Agora é um relógio só, o suavizado.
+	fundo.avancar(passo)
+	moldura.avancar(passo)
+	letreiro_do_nome.avancar(passo)
 	tremor = maxf(0.0, tremor - passo * 26.0)
 	clarao = maxf(0.0, clarao - passo * 2.6)
 	if transicao >= 0.0:
@@ -1140,7 +1207,7 @@ func _entrar_em_resultado(encerrar_rodada := false) -> void:
 		var ultimo: Dictionary = socos[socos.size() - 1]
 		result_score = int(ultimo["pontos"])
 		result_speed = float(ultimo["velocidade"])
-	if socos.size() >= SOCOS_POR_RODADA or rodada_encerrada_antecipadamente:
+	if _rodada_terminou():
 		_fechar_rodada()
 	else:
 		# COLOCAÇÃO NO RANKING SÓ EXISTE NO FIM DA RODADA. Sem zerar aqui,
@@ -1155,6 +1222,28 @@ func _entrar_em_resultado(encerrar_rodada := false) -> void:
 	proximo_tique = 0
 	proximo_fogo = 0.0
 	verdict_time = -1.0
+
+## A RODADA TERMINOU? Vale para os dois jeitos de ela acabar: os dois
+## socos dados, ou a espera estourada com um soco já na conta.
+func _rodada_terminou() -> bool:
+	return socos.size() >= SOCOS_POR_RODADA or rodada_encerrada_antecipadamente
+
+## A TABELA DE RECORDES ESTÁ NA TELA?
+##
+## Duas condições, e a segunda foi esquecida por muito tempo porque dois
+## relógios sem relação nenhuma vinham, por acaso, dando no mesmo número:
+## a tabela entrava 2,5 s depois do veredito e o segundo soco era armado
+## 2,5 s depois do veredito, então a tabela nunca chegava a aparecer
+## ENTRE os dois socos. Encurtar a revelação desfez a coincidência — e o
+## Top 20 passaria a piscar por um segundo no meio da rodada, com a
+## colocação zerada, antes de a máquina pedir o segundo soco.
+##
+## O acaso vira regra escrita aqui: a tabela é o fim da rodada. Quem
+## ainda tem soco a dar não a vê.
+func _tabela_no_ar() -> bool:
+	return state == GameDef.State.RESULT \
+		and verdict_time >= ESPERA_DO_RANKING \
+		and _rodada_terminou()
 
 func _processar_resultado(delta: float) -> void:
 	result_time += delta
@@ -1174,7 +1263,10 @@ func _processar_resultado(delta: float) -> void:
 	elif verdict_time >= 0.0:
 		verdict_time += delta
 		_manter_festa(delta)
-		if verdict_time >= 2.5 and not ranking_announced:
+		# O ANÚNCIO DO RANKING TAMBÉM É DO FIM DA RODADA. Tocar o som do
+		# Top 20 entre o primeiro e o segundo soco anunciaria uma
+		# colocação que ainda não existe.
+		if _tabela_no_ar() and not ranking_announced:
 			ranking_announced = true
 			sons.play("ranking", -5.0)
 			sons.music(-24.0)
@@ -1188,7 +1280,7 @@ func _processar_resultado(delta: float) -> void:
 	# AINDA HÁ SOCO A DAR? O resultado deste fica à vista o tempo de ser
 	# lido, e a máquina rearma. É o mesmo caminho do último soco até aqui;
 	# só o que vem depois do veredito é diferente.
-	if socos.size() < SOCOS_POR_RODADA and not rodada_encerrada_antecipadamente:
+	if not _rodada_terminou():
 		if verdict_time >= ESPERA_PARA_O_PROXIMO_SOCO:
 			_armar_proximo_soco()
 		return
@@ -1778,7 +1870,14 @@ var calib_repouso_left := 0.0
 var calib_ruido := 0.0
 var calib_fracos: Array[float] = []
 var calib_fortes: Array[float] = []
-var calib_picos: Array[float] = []
+## O NÍVEL DE SINAL VISTO EM CADA GOLPE — só para a tela mostrar.
+##
+## No firmware óptico este campo é a leitura de A0, de 0 a 1: um nível de
+## luz, NÃO uma aceleração. Ele já entrou em conta como se fosse g, e foi
+## assim que um "ruído" virou gatilho e a máquina se estrangulou. Agora
+## ele é o que sempre foi — um número para conferir a olho se o sensor
+## está enxergando — e `Calibracao.sugerir` não o recebe mais.
+var calib_sinais: Array[float] = []
 var calib_sugestao: Dictionary = {}
 
 func _abrir_calibracao() -> void:
@@ -1788,7 +1887,7 @@ func _abrir_calibracao() -> void:
 	calib_ruido = 0.0
 	calib_fracos.clear()
 	calib_fortes.clear()
-	calib_picos.clear()
+	calib_sinais.clear()
 	calib_sugestao = {}
 	_show_notice("CALIBRAÇÃO: DEIXE O SACO PARADO")
 
@@ -1818,18 +1917,18 @@ func _calibracao_recebeu(velocidade: float, pico: float) -> void:
 			calib_ruido = maxf(calib_ruido, pico)
 		1:
 			calib_fracos.append(velocidade)
-			calib_picos.append(pico)
+			calib_sinais.append(pico)
 			sons.play("tick", -6.0)
 			if calib_fracos.size() >= Calibracao.AMOSTRAS:
 				calib_passo = 2
 				sons.play("menu", -8.0)
 		2:
 			calib_fortes.append(velocidade)
-			calib_picos.append(pico)
+			calib_sinais.append(pico)
 			sons.play("tick", -3.0)
 			if calib_fortes.size() >= Calibracao.AMOSTRAS:
 				calib_passo = 3
-				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_ruido, sensor_raio)
 				sons.play("record", -6.0)
 
 func _click_calibracao(p: Vector2) -> void:
@@ -1847,14 +1946,22 @@ func _click_calibracao(p: Vector2) -> void:
 		elif calib_passo < 3:
 			calib_passo += 1
 			if calib_passo == 3:
-				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_ruido, sensor_raio)
 	elif CALIB_BOTOES["calib_salvar"].has_point(p):
 		if calib_sugestao.is_empty():
 			return
 		hit_min_speed = float(calib_sugestao["vmin"])
 		hit_max_speed = float(calib_sugestao["vmax"])
+		# O SOCO DE REFERÊNCIA VEM DA MEDIÇÃO, e não de uma fração fixa
+		# da faixa. É ele que decide quanto vale um soco comum NESTA
+		# montagem, então é a parte da calibração que mais se sente na
+		# fila — e a que mais depende de como este saco responde.
+		score_ref_speed = float(calib_sugestao["vref"])
 		sensor_vmin = hit_min_speed
-		sensor_amin = float(calib_sugestao["amin"])
+		# O pulso não é escolhido: `_aplicar_faixas`, logo abaixo, o
+		# recalcula com a mesma função que a sugestão usou. Copiar aqui
+		# só mantém tela e disco em dia caso a ordem das chamadas mude.
+		sensor_pulso_ms = float(calib_sugestao["pulso_ms"])
 		_aplicar_faixas()
 		_salvar()
 		# O firmware precisa saber também: é ele que decide o que virar
@@ -1887,7 +1994,12 @@ func _draw_calibracao() -> void:
 			_texto_arcade("NÃO ENCOSTE NO SACO", 620.0, 56, Color.WHITE, LARGURA_UTIL)
 			_rotulo("medindo o ruído de repouso do sensor", 690.0, Paleta.TINTA_FRACA)
 			_texto_arcade("%.1f s" % calib_repouso_left, 820.0, 96, Paleta.AMBAR, LARGURA_UTIL)
-			_rotulo("maior pico visto: %.2f g" % calib_ruido, 900.0, Paleta.CIANO)
+			# O NÚMERO TEM DE DIZER A UNIDADE CERTA. Aqui ele vinha
+			# escrito em "g", e no sensor óptico não é aceleração
+			# nenhuma: é o nível de luz em A0, de 0 a 1. Rotular errado
+			# é o começo de usar errado — foi assim que este valor foi
+			# parar num campo de milissegundos.
+			_rotulo("maior nível visto: %.3f (sinal de A0)" % calib_ruido, 900.0, Paleta.CIANO)
 		1:
 			_passo_de_golpes("CINCO GOLPES FRACOS", "bata de leve, como quem testa", calib_fracos)
 		2:
@@ -1926,28 +2038,40 @@ func _resultado_da_calibracao() -> void:
 		_rotulo("volte e registre os golpes", 690.0, Paleta.TINTA_FRACA)
 		return
 	_texto_arcade("SUGESTÃO", 580.0, 52, Paleta.VERDE, LARGURA_UTIL)
+	# AS QUATRO LINHAS, NA ORDEM EM QUE SE LÊ A MÁQUINA: onde começa a
+	# pontuar, quanto vale um soco comum, onde está o topo — e só então o
+	# número que é consequência dos outros três.
 	var linhas := [
 		["VELOCIDADE MÍNIMA", "%.1f m/s" % float(calib_sugestao["vmin"]), str(calib_sugestao["porque_vmin"])],
+		[
+			"SOCO DE REFERÊNCIA (%d)" % ScoreCurve.PONTOS_DE_REFERENCIA,
+			"%.1f m/s" % float(calib_sugestao["vref"]), str(calib_sugestao["porque_vref"]),
+		],
 		["VELOCIDADE MÁXIMA", "%.1f m/s" % float(calib_sugestao["vmax"]), str(calib_sugestao["porque_vmax"])],
-		["SENSIBILIDADE", "%.1f g" % float(calib_sugestao["amin"]), str(calib_sugestao["porque_amin"])],
+		# ESTA LINHA DIZIA "SENSIBILIDADE, %.1f g" — e o número ia para
+		# um campo que o firmware lê em MILISSEGUNDOS. Ver `Calibracao`.
+		["PULSO MÍNIMO", "%.2f ms" % float(calib_sugestao["pulso_ms"]), str(calib_sugestao["porque_pulso"])],
 	]
 	for i in range(linhas.size()):
-		var y := 660.0 + float(i) * 118.0
-		_cartao(Rect2(120, y - 40.0, 840, 100), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
-		_texto(str(linhas[i][0]), y, 20, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 400.0)
+		var y := 640.0 + float(i) * 104.0
+		_cartao(Rect2(120, y - 38.0, 840, 92), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+		_texto(str(linhas[i][0]), y, 20, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 430.0)
 		_texto(str(linhas[i][1]), y, 30, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 150.0, 780.0)
-		_texto(str(linhas[i][2]), y + 30.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 780.0)
+		_texto(str(linhas[i][2]), y + 28.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 780.0)
 
 	# A CURVA QUE VAI VALER, desenhada antes de salvar. É o único jeito de
 	# alguém discordar da sugestão com fundamento.
-	_rotulo("A CURVA COM ESTES NÚMEROS", 1070.0, Paleta.CREME)
+	_rotulo("A CURVA COM ESTES NÚMEROS", 1080.0, Paleta.CREME)
 	var antes_min := hit_min_speed
 	var antes_max := hit_max_speed
+	var antes_ref := score_ref_speed
 	hit_min_speed = float(calib_sugestao["vmin"])
 	hit_max_speed = float(calib_sugestao["vmax"])
-	_curva_desenhada(Rect2(120, 1100, 840, 180))
+	score_ref_speed = float(calib_sugestao["vref"])
+	_curva_desenhada(Rect2(120, 1110, 840, 170))
 	hit_min_speed = antes_min
 	hit_max_speed = antes_max
+	score_ref_speed = antes_ref
 	_apoio(
 		"salvando, os valores vão para a máquina E para o firmware do sensor",
 		1352.0, Paleta.TINTA_FRACA
@@ -2865,11 +2989,12 @@ func _receber_hit(msg: Dictionary) -> void:
 	# portanto capazes de sobreviver a uma atualização e de discordar do
 	# primeiro para sempre.
 	#
-	# Era por aí que a máquina morria de vez: um `sensor_amin` envenenado
+	# Era por aí que a máquina morria de vez: um pulso mínimo envenenado
 	# por uma calibração ruim recusava, em silêncio, golpes que a placa
 	# tinha acabado de aprovar. Do lado de fora, "o sensor parou de
 	# funcionar" — e nenhuma reinstalação resolvia, porque o número estava
-	# no arquivo de ajustes e não no programa.
+	# no arquivo de ajustes e não no programa. Hoje ele nem é mais
+	# escolhido: sai da geometria, em `_aplicar_faixas`.
 	#
 	# Agora há um dono só para cada coisa:
 	#   A PLACA decide SE FOI UM SOCO — ela tem os 250 Hz, a linha de base
@@ -2877,9 +3002,9 @@ func _receber_hit(msg: Dictionary) -> void:
 	#   O JOGO decide SE ESTE SOCO CONTA AGORA — que é regra de jogo, não
 	#   de física.
 	#
-	# `sensor_amin` continua existindo, mas só como o que sempre deveria
-	# ter sido: um número que o jogo MANDA à placa no CONFIG, nunca um
-	# segundo filtro deste lado.
+	# `sensor_pulso_ms` continua existindo, mas só como o que sempre
+	# deveria ter sido: um número que o jogo MANDA à placa no CONFIG,
+	# nunca um segundo filtro deste lado.
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
 	_processar_golpe(speed, false, pico, duracao)
@@ -2890,7 +3015,8 @@ func _processar_golpe(
 	speed: float, simulado: bool, pico_g := 0.0, duracao_ms := 0.0
 ) -> void:
 	var pontos := ScoreCurve.points_from_speed(
-		speed, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
+		speed, hit_min_speed, hit_max_speed, score_contraste, score_dead_zone,
+		score_ref_speed
 	)
 	if pontos <= 0:
 		_show_notice("MOVIMENTO ABAIXO DA ZONA DE PONTUAÇÃO")
@@ -2925,7 +3051,7 @@ func _mandar_fitas(fracao: float, agora := true) -> void:
 func _enviar_config() -> void:
 	if link != null and link.is_open():
 		link.send_line(ArduinoProtocol.build_config(
-			sensor_eixo, sensor_raio, hit_min_speed, sensor_amin, hit_max_speed
+			sensor_eixo, sensor_raio, hit_min_speed, sensor_pulso_ms, hit_max_speed
 		))
 
 ## Cada tentativa abre uma janela nova também na placa. Isto elimina estado
@@ -2941,11 +3067,19 @@ func _teste_de_golpe() -> void:
 		link.send_line("TEST")
 		_show_notice("TESTE SOLICITADO AO ARDUINO")
 	else:
-		var speed := randf_range(hit_min_speed + 1.0, hit_max_speed * 0.9)
+		# O GOLPE SIMULADO TEM DE CAIR DENTRO DA FAIXA CALIBRADA.
+		#
+		# Era `randf_range(vmin + 1,0, vmax * 0,9)`, e o `+ 1,0` é um
+		# metro por segundo fixo num número que pode valer 1,2 no total:
+		# numa montagem lenta o piso do sorteio passava do teto, e o
+		# botão de testar da Central mostrava um soco fora da escala da
+		# própria máquina. Em fração da faixa, ele cai sempre onde deve —
+		# de um golpe médio a um golpe forte.
+		var speed := lerpf(hit_min_speed, hit_max_speed, randf_range(0.45, 0.88))
 		_show_notice("GOLPE SIMULADO — %.1f m/s" % speed)
 		if state == GameDef.State.ARMED:
 			_receber_hit({
-				"speed": speed, "accel": maxf(sensor_amin, 8.0),
+				"speed": speed, "accel": 0.5,
 				"duration_ms": 45.0, "axis": sensor_eixo,
 			})
 
@@ -3208,12 +3342,15 @@ func _click_central(p: Vector2) -> void:
 		porta_configurada = ""
 		hit_min_speed = ScoreCurve.DEFAULT_MIN_SPEED
 		hit_max_speed = ScoreCurve.DEFAULT_MAX_SPEED
-		score_exponent = ScoreCurve.DEFAULT_EXPONENT
+		score_contraste = ScoreCurve.DEFAULT_CONTRASTE
+		score_ref_speed = ScoreCurve.REFERENCIA_AUTOMATICA
 		score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
 		sensor_eixo = "A"
 		sensor_raio = 0.020
 		sensor_vmin = ScoreCurve.DEFAULT_MIN_SPEED
-		sensor_amin = 0.70
+		# O pulso mínimo não aparece aqui porque não é um padrão: é uma
+		# conta. `_aplicar_faixas`, no fim desta função, o refaz a partir
+		# da palheta e do teto que acabaram de voltar ao padrão.
 		_show_notice("PADRÕES RESTAURADOS")
 	else:
 		return
@@ -3236,9 +3373,23 @@ func _ajustar(chave: String, direcao: int) -> void:
 				maxf(ScoreCurve.MAX_SPEED_MIN, hit_min_speed + 0.5), ScoreCurve.MAX_SPEED_MAX
 			)
 		"curva":
-			score_exponent = clampf(score_exponent + direcao * 0.05, ScoreCurve.EXPONENT_MIN, ScoreCurve.EXPONENT_MAX)
-		"zona":
-			score_dead_zone = clampf(score_dead_zone + direcao * 0.01, 0.0, ScoreCurve.DEAD_ZONE_MAX)
+			score_contraste = clampf(
+				score_contraste + direcao * 0.05,
+				ScoreCurve.CONTRASTE_MIN, ScoreCurve.CONTRASTE_MAX
+			)
+		"referencia":
+			# O SOCO DE REFERÊNCIA ANDA EM m/s, como tudo mais nesta
+			# página. Um passo de 0,1 é o mesmo do piso: quem regula
+			# compara os três números na mesma unidade e na mesma escala.
+			score_ref_speed = clampf(
+				_referencia_efetiva() + direcao * 0.1,
+				hit_min_speed + (hit_max_speed - hit_min_speed) * ScoreCurve.REFERENCIA_MIN,
+				hit_min_speed + (hit_max_speed - hit_min_speed) * ScoreCurve.REFERENCIA_MAX
+			)
+		# "zona" não tem mais passo na Central — ver `_central_golpe`. O
+		# ajuste continua no arquivo e continua valendo na curva; o que
+		# saiu foi a segunda maneira de dizer o que a VELOCIDADE MÍNIMA
+		# já diz.
 		"vol_musica":
 			volume_musica = clampf(volume_musica + direcao, -40.0, 6.0)
 			sons.set_volumes(volume_musica, volume_efeitos)
@@ -3249,8 +3400,7 @@ func _ajustar(chave: String, direcao: int) -> void:
 			_girar_porta(direcao)
 		"raio":
 			sensor_raio = clampf(sensor_raio + direcao * 0.001, 0.005, 0.100)
-		"amin":
-			sensor_amin = clampf(sensor_amin + direcao * 0.05, 0.15, 20.0)
+
 	_aplicar_faixas()
 
 ## AS PORTAS QUE SE PODE FIXAR — e não só as que estão à vista.
@@ -3344,22 +3494,36 @@ func _carregar() -> void:
 		hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 		hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
 		if int(data.get("score_schema", 0)) >= ESQUEMA_DA_PONTUACAO:
-			score_exponent = float(data.get("score_exponent", score_exponent))
+			score_contraste = float(data.get("score_contraste", score_contraste))
+			score_ref_speed = float(data.get("score_ref_speed", score_ref_speed))
 			score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
 		else:
 			# Atualiza a curva sem elevar o teto medido nem alterar a montagem.
-			score_exponent = ScoreCurve.DEFAULT_EXPONENT
+			# ESQUEMA ANTIGO: a dificuldade era um expoente de 1,5 a 4,5 e
+			# o campo de mesmo espírito agora vai de 0,70 a 1,80. Ler um
+			# pelo outro entregaria a máquina no contraste máximo sem
+			# ninguém ter pedido. A faixa medida no gabinete continua
+			# valendo, então a âncora volta para o automático e é
+			# recalculada a partir dela.
+			score_contraste = ScoreCurve.DEFAULT_CONTRASTE
+			score_ref_speed = ScoreCurve.REFERENCIA_AUTOMATICA
 			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
 		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
-		sensor_amin = float(data.get("sensor_amin", sensor_amin))
+		# O PULSO MÍNIMO NÃO É LIDO DO DISCO, e isto é de propósito.
+		#
+		# Ele é consequência da largura da palheta e do teto de
+		# velocidade, e as duas acabaram de ser carregadas: `_aplicar_faixas`
+		# o recalcula em seguida. Ler um valor gravado seria justamente o
+		# que fez a máquina se estrangular e permanecer estrangulada —
+		# um número errado, salvo em disco, sobrevivendo a reinstalação.
+		# O `sensor_amin` de versões antigas fica no arquivo e é ignorado.
 	else:
 		# Valores antigos do MPU nao servem para o sensor optico.
 		sensor_eixo = "A"
 		sensor_raio = 0.020
-		sensor_amin = 0.70
 		ajustes_do_sensor_zerados = not data.is_empty()
 	volume_musica = float(data.get("volume_musica", volume_musica))
 	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
@@ -3398,12 +3562,13 @@ func _salvar() -> void:
 		"serial_last_good_backend": caminho_serial_conhecido,
 		"hit_min_speed": hit_min_speed,
 		"hit_max_speed": hit_max_speed,
-		"score_exponent": score_exponent,
+		"score_contraste": score_contraste,
+		"score_ref_speed": score_ref_speed,
 		"score_dead_zone": score_dead_zone,
 		"sensor_eixo": sensor_eixo,
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
-		"sensor_amin": sensor_amin,
+		"sensor_pulso_ms": sensor_pulso_ms,
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
@@ -3449,7 +3614,7 @@ func _draw() -> void:
 			ArcadeStage.intro(self, intro_time)
 		else:
 			_draw_show_idle()
-	elif state == GameDef.State.RESULT and verdict_time >= 2.5:
+	elif _tabela_no_ar():
 		_draw_ranking_reveal()
 	else:
 		_draw_partida()
@@ -4299,17 +4464,31 @@ func _cor_da_posicao(posicao: int) -> Color:
 ## Quem NÃO entrou no Top 20 pula os atos 1, 3 e 4 e vai direto à tabela.
 ## Comemorar o que não aconteceu é o jeito mais rápido de a máquina
 ## perder a credibilidade.
-## SEM PRESSA. Os tempos eram 0,90 / 0,85 / 0,55 — dois segundos e pouco
-## para anunciar, montar a tabela e assentar a linha. Cabia, mas passava
-## rápido demais para ser vivido: quem entrou no Top 20 mal via acontecer.
-## Um segundo a mais em cada ato não atrasa a fila (o veredito fica doze
-## segundos na tela de qualquer jeito) e é a diferença entre ver e ler.
-const ATO_ANUNCIO := 1.45
-const ATO_TABELA := 1.20
-const ATO_ASSENTA := 0.80
+## O RITMO DOS ATOS — QUE JÁ FOI RÁPIDO DEMAIS E AÍ FICOU LENTO DEMAIS.
+##
+## Primeiro foram 0,90 / 0,85 / 0,55: dois segundos e pouco para
+## anunciar, montar a tabela e assentar a linha. Passava rápido demais
+## para ser vivido, e quem entrava no Top 20 mal via acontecer.
+##
+## A correção foi generosa demais na outra direção: 1,45 / 1,20 / 0,80,
+## mais 2,5 s de espera antes de tudo. São SEIS SEGUNDOS entre o veredito
+## e a linha assentando no lugar — com o número já revelado, o nível já
+## anunciado e nada mais em jogo. Essa é a parte da tela em que quem
+## jogou já sabe o resultado e está esperando a máquina terminar de
+## dizê-lo, e foi ela que chegou como "a animação do ranking está
+## devagar".
+##
+## Estes tempos são o meio: pouco mais de três segundos do veredito até
+## a linha no lugar. Cada ato continua sendo um ato — o anúncio ainda
+## para a tela, a tabela ainda chega, a linha ainda cai e bate —, mas
+## nenhum deles espera por si mesmo. A comemoração que vem depois
+## (confete, torcida) não encolheu: essa a pessoa quer que dure.
+const ATO_ANUNCIO := 0.95
+const ATO_TABELA := 0.68
+const ATO_ASSENTA := 0.45
 
 func _tempo_do_ranking() -> float:
-	return maxf(0.0, verdict_time - 2.5)
+	return maxf(0.0, verdict_time - ESPERA_DO_RANKING)
 
 func _draw_ranking_reveal() -> void:
 	var t := _tempo_do_ranking()
@@ -4615,14 +4794,41 @@ func _ficha_do_botao(mapa: Dictionary, titulo: String, rect: Rect2, contador: in
 
 # ------------------------------------------------------------- GOLPE
 func _central_golpe() -> void:
-	_secao(Rect2(80, 350, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
+	# AS TRÊS ÂNCORAS, NA MESMA UNIDADE E NA MESMA CAIXA.
+	#
+	# Piso, soco médio e teto são a régua inteira, em m/s. Quem regula lê
+	# os três de uma vez e sabe o que a máquina vai pagar — era isso que
+	# faltava enquanto a dificuldade era um expoente adimensional numa
+	# caixa ao lado, que só dizia alguma coisa a quem já sabia a conta.
+	# Ver `ScoreCurve`.
+	_secao(Rect2(80, 350, 920, 284), "A RÉGUA DO SOCO", Paleta.CIANO)
 	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
 	_stepper(
-		"curva", "γ %.2f" % score_exponent,
-		"CURVA  %s" % ScoreCurve.difficulty_name(score_exponent), Paleta.ROXO
+		"referencia", "%.1f m/s" % _referencia_efetiva(),
+		"SOCO MÉDIO = %04d  •  %s" % [
+			ScoreCurve.PONTOS_DE_REFERENCIA,
+			ScoreCurve.difficulty_name(hit_min_speed, hit_max_speed, score_ref_speed),
+		],
+		Paleta.AMBAR
 	)
-	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
+	_stepper(
+		"curva", "%.2f ×" % score_contraste,
+		"CONTRASTE — não mexe nas âncoras", Paleta.ROXO
+	)
+	# A ZONA MORTA SAIU DESTA PÁGINA, e não é economia de espaço.
+	#
+	# Ela era um segundo jeito de dizer a mesma coisa que a VELOCIDADE
+	# MÍNIMA já diz: "abaixo disto não pontua". Uma em fração da faixa, a
+	# outra em m/s, cada uma com o seu passo, as duas somando. Dois
+	# controles para uma ideia só é como eles acabam discordando — e quem
+	# regula não tinha como saber qual dos dois estava recusando o golpe
+	# fraco que ele acabou de dar.
+	#
+	# O ajuste continua existindo no arquivo de configuração e continua
+	# sendo respeitado pela curva, para não mudar de comportamento numa
+	# máquina que já tinha um valor gravado. O que saiu foi a segunda
+	# maneira de mexer nele.
 
 	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
 	# A régua engordou e a legenda desceu: com a letra no corpo novo, o
@@ -4630,7 +4836,7 @@ func _central_golpe() -> void:
 	# por cima do outro.
 	_regua_dos_niveis(Rect2(110, 700, 860, 46))
 	_texto(
-		"As faixas são fixas. Quem decide quanta gente chega a cada uma é a curva.",
+		"As faixas são fixas. Quem decide quanta gente chega a cada uma é o soco médio.",
 		772.0, 15, Paleta.TINTA_FRACA
 	)
 	_curva_desenhada(Rect2(110, 782, 860, 56))
@@ -4650,7 +4856,35 @@ func _central_golpe() -> void:
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
 	_texto("POLARIDADE DO BLOQUEIO", 1102.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.0f mm" % (sensor_raio * 1000.0), "LARGURA DA PALHETA", Paleta.CIANO)
-	_stepper("amin", "%.2f ms" % sensor_amin, "PULSO MÍNIMO", Paleta.CIANO)
+	# O PULSO MÍNIMO PERDEU O − E O +, E ISSO É O CONSERTO.
+	#
+	# Ele é um teto de velocidade escrito ao contrário: aumentá-lo
+	# ESTREITA o que a máquina aceita. Foi por ser um passo como os
+	# outros que uma calibração conseguiu gravar gravidades num campo de
+	# milissegundos e a máquina passou a recusar justamente os socos
+	# fortes, em silêncio. Agora é leitura — sai da palheta e do teto
+	# calibrado — e ao lado vem a única frase que o torna conferível a
+	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
+	# dentro disso.
+	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
+	var caixa_pulso := Rect2(570, 1124, 400, LADO_BOTAO)
+	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+	_texto(
+		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
+		HORIZONTAL_ALIGNMENT_CENTER, caixa_pulso.position.x, caixa_pulso.size.x
+	)
+	_texto(
+		"PULSO MÍNIMO — CALCULADO", caixa_pulso.end.y + 20.0, 15, Paleta.TINTA_FRACA,
+		HORIZONTAL_ALIGNMENT_CENTER, caixa_pulso.position.x, caixa_pulso.size.x
+	)
+	_texto(
+		"o sensor mede de %.2f a %.1f m/s  •  a régua vai até %.1f" % [
+			janela.x, janela.y, hit_max_speed
+		],
+		1222.0, 15,
+		Paleta.VERMELHO if janela.y < hit_max_speed else Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_CENTER, 120.0, 840.0
+	)
 
 	_secao(Rect2(80, 1252, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
@@ -4673,7 +4907,9 @@ func _central_golpe() -> void:
 ## salvar, senão regula por tentativa e erro em cima da fila do salão.
 func _curva_desenhada(rect: Rect2) -> void:
 	_cartao(rect, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
-	var amostras := ScoreCurve.amostrar(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone, 64)
+	var amostras := ScoreCurve.amostrar(
+		hit_min_speed, hit_max_speed, score_contraste, score_dead_zone, 64, score_ref_speed
+	)
 	if amostras.is_empty():
 		return
 	var v_max: float = (amostras[amostras.size() - 1] as Vector2).x

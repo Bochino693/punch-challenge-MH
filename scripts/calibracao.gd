@@ -1,9 +1,6 @@
 class_name Calibracao
 extends RefCounted
 
-## O MAIOR GATILHO QUE AINDA DEIXA UM SOCO PASSAR. Ver `sugerir`.
-const TETO_DO_GATILHO_G := 5.0
-
 ## A CONTA DO ASSISTENTE DE CALIBRAÇÃO.
 ##
 ## Só matemática: recebe as amostras colhidas na Central e devolve os
@@ -16,6 +13,27 @@ const TETO_DO_GATILHO_G := 5.0
 ## depender do pior e do melhor golpe do dia. O percentil descarta o
 ## acidente sem precisar que alguém decida, na hora, qual amostra jogar
 ## fora.
+##
+## O QUE ESTA VERSÃO CORRIGE, E POR QUE ERA GRAVE.
+##
+## A sugestão antiga devolvia um campo `amin` em GRAVIDADES — herança do
+## firmware do acelerômetro, onde "sensibilidade" era mesmo um limiar de
+## g. O jogo gravava esse número e o mandava à placa como o QUARTO campo
+## do CONFIG, que no firmware óptico é o PULSO MÍNIMO EM MILISSEGUNDOS.
+## Duas unidades diferentes no mesmo campo, e ninguém avisado.
+##
+## O estrago não é sutil. Pulso mínimo é um teto de VELOCIDADE ao
+## contrário: 5 ms com uma palheta de 20 mm manda a placa recusar tudo
+## acima de 4 m/s. Ou seja, quanto mais forte o soco, maior a chance de a
+## máquina responder `CURTO` e não pontuar nada — e o número vinha de uma
+## medição de ruído, então bastava um soco cair no passo de REPOUSO para
+## a máquina se estrangular sozinha e ficar assim, gravada em disco,
+## sobrevivendo à reinstalação do jogo.
+##
+## Agora não sai daqui número em g nenhum. O pulso mínimo é DERIVADO da
+## geometria (`ArduinoProtocol.pulso_minimo_ms`): largura da palheta e
+## teto calibrado entram, milissegundos saem, e o limite passa a bater
+## exatamente com o outro limite que o firmware já aplica sozinho.
 
 ## Quantos golpes de cada tipo o assistente pede.
 const AMOSTRAS := 5
@@ -29,11 +47,33 @@ const PERCENTIL_TETO := 0.80
 ##
 ## O piso desce um pouco mais: quem bate fraco tem de ver ALGUM ponto,
 ## senão acha que a máquina não registrou e vai embora achando que
-## quebrou. O teto sobe, para 9999 continuar sendo raro — se o teto
-## fosse o golpe mais forte já medido, o primeiro cliente forte da noite
-## zeraria o desafio.
+## quebrou.
 const FOLGA_PISO := 0.85
-const FOLGA_TETO := 1.08
+
+## O TETO SOBE BASTANTE MAIS DO QUE SUBIA — 22% em vez de 8%.
+##
+## Com a curva ancorada (ver `ScoreCurve`), a nota deixou de esmagar o
+## meio da escala: um soco a 90% da faixa agora paga nove mil e poucos,
+## e não sete mil e pouco. Isso é o conserto que se queria, mas devolve o
+## problema pela outra ponta — com apenas 8% de folga, o próprio técnico
+## que calibrou tiraria 9999 no primeiro soco forte da noite, e um teto
+## que o primeiro cliente encosta deixa de ser teto.
+##
+## Com 22%, o golpe forte típico da calibração cai perto de NOCAUTE:
+## impressionante, comemorado, e ainda com o topo da escala por
+## conquistar. É o ponto em que a máquina fica justa nas duas pontas ao
+## mesmo tempo.
+const FOLGA_TETO := 1.22
+
+## ONDE FICA O SOCO DE REFERÊNCIA, entre o golpe fraco típico e o forte
+## típico. A curva paga exatamente 5000 nele.
+##
+## 0,62 e não 0,50: quem calibra dá o "golpe fraco" de propósito mais
+## fraco do que qualquer cliente daria, porque o passo pede um toque de
+## teste. A média real do salão fica acima do meio entre as duas
+## demonstrações, e ancorar no meio geométrico tornaria a máquina
+## generosa demais com quem mal encostou.
+const REFERENCIA_ENTRE := 0.62
 
 ## O valor num percentil de uma lista, por interpolação linear.
 static func percentil(valores: Array, p: float) -> float:
@@ -50,11 +90,18 @@ static func percentil(valores: Array, p: float) -> float:
 
 ## A SUGESTÃO COMPLETA.
 ##
-## `fracos` e `fortes` são velocidades em m/s; `picos` são as acelerações
-## de pico (g) dos golpes aceitos; `ruido` é o maior pico visto com o saco
-## PARADO. Devolve os quatro parâmetros e o motivo de cada um, porque
-## quem calibra precisa poder discordar com fundamento.
-static func sugerir(fracos: Array, fortes: Array, picos: Array, ruido: float) -> Dictionary:
+## `fracos` e `fortes` são velocidades em m/s; `ruido` é o maior nível de
+## sinal visto com o saco PARADO (no sensor óptico ele é a leitura de A0,
+## de 0 a 1 — NÃO é uma aceleração, e não entra em conta nenhuma: vai
+## junto só para a tela poder mostrar o que foi medido). `largura_m` é a
+## largura da palheta, e é ela que transforma o teto de velocidade no
+## pulso mínimo que a placa precisa receber.
+##
+## Devolve os parâmetros e o motivo de cada um, porque quem calibra
+## precisa poder discordar com fundamento.
+static func sugerir(
+	fracos: Array, fortes: Array, ruido: float, largura_m := 0.020
+) -> Dictionary:
 	var piso := percentil(fracos, PERCENTIL_PISO) * FOLGA_PISO
 	var teto := percentil(fortes, PERCENTIL_TETO) * FOLGA_TETO
 
@@ -64,44 +111,39 @@ static func sugerir(fracos: Array, fortes: Array, picos: Array, ruido: float) ->
 	if teto < piso + 0.5:
 		teto = piso + 0.5
 
-	# A SENSIBILIDADE FICA ACIMA DO RUÍDO DE REPOUSO, e abaixo do golpe
-	# mais fraco que se quer aceitar. Nessa ordem: primeiro não disparar
-	# sozinha, depois não perder soco.
-	var pico_minimo := percentil(picos, 0.10) * 0.6
-	var amin := maxf(ruido * 1.8, 1.0)
-	if pico_minimo > amin:
-		amin = (amin + pico_minimo) * 0.5
+	# O SOCO DE REFERÊNCIA sai das duas demonstrações, e não de uma
+	# fração da faixa: a faixa já tem as folgas dentro dela, e ancorar
+	# numa fração dela seria ancorar na folga.
+	var referencia := lerpf(
+		percentil(fracos, 0.5), percentil(fortes, 0.5), REFERENCIA_ENTRE
+	)
 
-	var cfg := ScoreCurve.sanitize(piso, teto, ScoreCurve.DEFAULT_EXPONENT, ScoreCurve.DEFAULT_DEAD_ZONE)
+	var cfg := ScoreCurve.sanitize(
+		piso, teto, ScoreCurve.DEFAULT_CONTRASTE, ScoreCurve.DEFAULT_DEAD_ZONE, referencia
+	)
+	var pulso := ArduinoProtocol.pulso_minimo_ms(largura_m, float(cfg["max_speed"]))
+	var janela := ArduinoProtocol.janela_medivel(largura_m, pulso)
 	return {
 		"vmin": cfg["min_speed"],
 		"vmax": cfg["max_speed"],
-		# O TETO DO GATILHO NAO PODE SER ALTO O BASTANTE PARA MATAR A MAQUINA.
-		#
-		# Era 15 g. Um soco de verdade fica entre 3 e 16 g, entao um
-		# gatilho de 15 g recusa praticamente TUDO -- e esta sugestao vai
-		# parar no disco e sobrevive a reinstalacao do jogo.
-		#
-		# E ele chegava la: `amin` sai de `ruido * 1,8`, e `ruido` e o maior
-		# pico visto no passo de REPOUSO. Bastava um soco ser contado como
-		# repouso -- que e exatamente o que acontecia com a calibracao presa
-		# ligada depois do F9 -- para o "ruido" virar 12 g e o gatilho
-		# saturar no teto. A maquina funcionava na primeira vez e nunca
-		# mais, sem nada na tela explicando.
-		#
-		# Cinco g e o limite do que ainda deixa passar um soco fraco
-		# legitimo. Acima disso a sugestao esta errada, venha de onde vier.
-		"amin": clampf(amin, 0.5, TETO_DO_GATILHO_G),
+		"vref": cfg["ref_speed"],
+		"pulso_ms": pulso,
 		"ruido": ruido,
 		"fracos": fracos.size(),
 		"fortes": fortes.size(),
+		"mede_ate": janela.y,
 		"porque_vmin": "percentil %d dos golpes fracos, com folga de %d%%" % [
 			int(PERCENTIL_PISO * 100.0), int((1.0 - FOLGA_PISO) * 100.0)
 		],
 		"porque_vmax": "percentil %d dos golpes fortes, com folga de %d%%" % [
 			int(PERCENTIL_TETO * 100.0), int((FOLGA_TETO - 1.0) * 100.0)
 		],
-		"porque_amin": "acima do ruído de repouso (%.1f g) e abaixo do golpe mais fraco" % ruido,
+		"porque_vref": "entre o fraco e o forte típicos — aqui o placar paga %d" % (
+			ScoreCurve.PONTOS_DE_REFERENCIA
+		),
+		"porque_pulso": "palheta de %d mm medindo até %.1f m/s" % [
+			int(round(largura_m * 1000.0)), janela.y
+		],
 	}
 
 ## Se há amostras suficientes para uma sugestão honesta.

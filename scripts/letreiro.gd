@@ -27,10 +27,14 @@ func _ready() -> void:
 	_material.shader = SHADER
 	material = _material
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_process(true)
+	# O relógio vem de `main.gd`, em `avancar`. Um nó com brilho correndo
+	# por cima das letras no seu próprio tempo é mais uma camada
+	# chacoalhando por conta própria. Ver `Ritmo`.
+	set_process(false)
 
-func _process(delta: float) -> void:
-	_tempo += delta
+## O PASSO VEM DE FORA, e é o mesmo do jogo inteiro.
+func avancar(passo: float) -> void:
+	_tempo += passo
 	var fase := fmod(_tempo, CICLO)
 	var posicao := DE - 0.5
 	if fase < PASSAGEM:

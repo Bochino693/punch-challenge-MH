@@ -92,6 +92,9 @@ var _fieira: Fieira = null
 var _fieira_marca := ""
 
 func _ready() -> void:
+	# Quem adianta o relógio desta moldura é `main.gd`, em `avancar`.
+	# Ver lá, e ver `Ritmo` para o porquê.
+	set_process(false)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	z_index = 4
@@ -109,9 +112,17 @@ func impacto(forca: float, cor: Color = Paleta.AMBAR) -> void:
 	_flash = maxf(_flash, clampf(forca, 0.0, 1.0))
 	_cor_flash = cor
 
-func _process(delta: float) -> void:
-	tempo += delta
-	_flash = maxf(0.0, _flash - delta * 3.2)
+## O PASSO VEM DE `main.gd`, e é o mesmo do jogo inteiro.
+##
+## Esta moldura tinha o seu `_process` e somava o delta CRU do quadro.
+## São mais de cem lâmpadas pulsando na borda da tela inteira — a camada
+## em que a trepidação do relógio mais salta aos olhos, porque o
+## movimento é lento, contínuo e periférico, que é o pior caso para o
+## olho. Com o passo suavizado ela pulsa liso; com o cru, chacoalhava
+## junto com todo o resto e por conta própria. Ver `Ritmo`.
+func avancar(passo: float) -> void:
+	tempo += passo
+	_flash = maxf(0.0, _flash - passo * 3.2)
 	queue_redraw()
 	# A fieira apagada só é refeita quando algo que ela desenha muda: o
 	# tamanho da tela, o estado (que troca a cor apagada de fundo) ou o

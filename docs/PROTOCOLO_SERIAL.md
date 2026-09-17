@@ -64,7 +64,7 @@ aparece só na linha de diagnóstico da Central Técnica.
 | `RESET` | `RESET` | Abandona a medição em andamento. |
 | `CALIBRATE` | `CALIBRATE` | Remede o repouso. **O saco precisa estar parado.** |
 | `TEST` | `TEST` | Devolve um `HIT` sintético (`HIT,7.50,9.20,120,<eixo>`). |
-| `CONFIG` | `CONFIG,<eixo>,<raio>,<vmin>,<amin>[,<vmax>]` | Configura a medição. O 5º campo é opcional. |
+| `CONFIG` | `CONFIG,<polaridade>,<palheta>,<vmin>,<pulso_min_ms>[,<vmax>]` | Configura a medição. O 5º campo é opcional. |
 | `LEDS` | `LEDS,<0..1000>` | Altura da coluna das duas fitas, em por mil. |
 
 ### `LEDS` e as duas fitas do gabinete
@@ -102,14 +102,41 @@ do Arduino. Sem ela o sketch não compila.
 
 ### `CONFIG` em detalhe
 
-`CONFIG,X,0.450,0.80,3.50`
+`CONFIG,A,0.020,0.80,1.75,5.20`
 
 | Campo | Unidade | Faixa | O que é |
 | --- | --- | --- | --- |
-| eixo | `X` `Y` `Z` | — | Eixo do MPU alinhado com a direção do soco. |
-| raio | metros | 0,05 a 1,50 | Distância do ponto de giro do saco até onde o soco chega. Entra na estimativa pelo giroscópio (`ω × raio`). |
+| polaridade | `A` `H` `L` | — | Nível do sinal D0 com a fenda BLOQUEADA. `A` descobre sozinho na calibração. |
+| palheta | metros | 0,005 a 0,100 | Largura da palheta que atravessa a fenda. É ela que converte duração em velocidade: `v = palheta ÷ duração`. |
 | vmin | m/s | 0,2 a 20,0 | Abaixo disso a placa nem reporta o golpe. |
-| amin | g | 0,5 a 15,0 | Limiar que arma a medição. Sobe se a máquina vibra sozinha; desce se golpe fraco não é reconhecido. |
+| pulso_min_ms | **milissegundos** | 0,15 a 20,0 | Duração mínima de bloqueio que ainda conta como soco. |
+
+### Cuidado com o quarto campo: ele é um TETO DE VELOCIDADE ao contrário
+
+Este é o campo que já custou uma máquina inteira, e vale entender por quê
+antes de mexer nele.
+
+A palheta atravessa a fenda, então **quanto mais forte o soco, mais curto
+o pulso**. Exigir um pulso mínimo MAIOR não deixa a máquina mais
+sensível: deixa-a cega para os socos rápidos. Com uma palheta de 20 mm,
+um `pulso_min_ms` de 5,00 manda a placa recusar como `CURTO` tudo acima
+de **4 m/s** — ou seja, justamente os melhores golpes da noite, e em
+silêncio, porque a recusa não aparece para quem está jogando.
+
+Pior: na versão do firmware para acelerômetro, este mesmo quarto campo
+era um limiar em **g** (e a versão antiga deste documento o descrevia
+assim). O assistente de calibração continuou mandando um número em g para
+um campo que o firmware óptico lê em milissegundos, e esse número vinha
+de uma medição de ruído — bastava um soco escapar no passo de REPOUSO
+para a máquina se estrangular sozinha, gravar isso em disco e continuar
+estrangulada depois de reinstalar o jogo.
+
+**Hoje ele não é mais escolhido.** Sai de uma conta só,
+`ArduinoProtocol.pulso_minimo_ms(palheta, vmax)`, que é a mesma regra que
+o firmware já aplica sozinho (`max(8, vmax × 2,2)`), para os dois limites
+tropeçarem no mesmo soco em vez de um recusar o que o outro aceita. Na
+Central ele aparece como leitura, com a janela que a montagem enxerga
+escrita ao lado.
 
 **Os dois lados validam.** `ArduinoProtocol.build_config` já limita os
 valores antes de enviar, e o firmware revalida ao receber, respondendo
@@ -125,25 +152,43 @@ fechar a Central Técnica. O botão **ENVIAR CONFIG** existe para reenviar
 
 ## Como a placa mede
 
-1. A aceleração dinâmica do eixo escolhido (bruta menos o repouso
-   calibrado) passa de `amin` → começa a medição.
-2. Enquanto o golpe dura, o firmware **integra** a aceleração a 250 Hz
-   para achar a velocidade de pico, e guarda a aceleração máxima.
-3. O giroscópio dá uma segunda estimativa: velocidade angular × raio.
-4. Vale a maior das duas — a integração perde golpes muito curtos, e o
-   giroscópio perde golpes que empurram o saco sem girá-lo.
-5. O golpe termina quando a aceleração cai abaixo de 40 % do limiar por
-   60 ms, ou aos 400 ms, o que vier antes. Depois há 650 ms de descanso,
-   para um soco não ser contado duas vezes.
+1. O jogo manda `ARM` ao começar cada tentativa. Sem isso a placa ignora
+   tudo: é o que impede o balanço do saco de virar pontuação.
+2. A palheta entra na fenda → o sinal D0 muda para o nível ativo e o
+   cronômetro começa, por interrupção.
+3. A palheta sai → o cronômetro para. A duração do bloqueio é o dado.
+4. `v = palheta ÷ duração`. Uma palheta de 20 mm bloqueada por 4 ms dá
+   5 m/s.
+5. Um `HIT` por `ARM`, e mais nada: depois de reportar, a placa fecha a
+   janela e só outro `ARM` a reabre. Somados o tempo morto de 1,2 s do
+   firmware e os 900 ms do jogo, o retorno do saco não tem como pontuar.
 
-O sensor mede **velocidade**, não força em newtons nem em quilogramas-força.
-A pontuação de 0 a 999 é uma escala de arcade calibrada, não uma medição
-de física.
+O sensor mede **velocidade**, não força em newtons nem em
+quilogramas-força. A pontuação de 0 a 9999 é uma escala de arcade
+calibrada, não uma medição de física.
 
-No jogo a velocidade é normalizada entre `vmin` e `vmax`, passa por
-`smoothstep` e depois por uma potência configurável. O padrão difícil usa
-expoente `2,00`; isso distribui melhor as notas e reserva 900–999 para os
-golpes realmente próximos da velocidade máxima.
+### A nota, no jogo
+
+A velocidade vira nota em `scripts/score_curve.gd`, por uma curva de
+**três âncoras**, e não mais por uma potência única:
+
+| Âncora | O que é | Paga |
+| --- | --- | --- |
+| `vmin` | abaixo disso não é soco | 0 |
+| `vref` | o soco do cliente médio | **5000, sempre** |
+| `vmax` | o teto da máquina | 9999 |
+
+As três valem com qualquer contraste — o segundo ajuste, que só decide
+quanto a nota se espalha ENTRE elas. Quem regula a dificuldade é o
+`vref`: exigir mais velocidade para pagar meio placar é, literalmente, a
+máquina ficar mais difícil, e isso se explica para o dono da máquina sem
+falar em expoente.
+
+A versão anterior usava `9999 × x^2,20`, e uma potência acima de 1 esmaga
+o meio da escala — que é onde está quase todo mundo. Um soco a 35 % da
+faixa calibrada pagava **974 pontos**; com as âncoras, paga cerca de
+2700. "Mil" lê como máquina que não registrou, e é por isso que a curva
+mudou de forma.
 
 ---
 
@@ -156,7 +201,7 @@ golpes realmente próximos da velocidade máxima.
 | `SEM RESPOSTA` depois de funcionar | A placa travou ou o cabo soltou. O jogo continua tentando sozinho. |
 | `ERROR,NO_MPU` | O MPU-6050 não respondeu no I2C. Confira SDA em A4, SCL em A5 e a alimentação. |
 | `SATURATION` a cada golpe forte | O sensor está no fundo de escala. A medida sai menor que a real: afaste o sensor do ponto de impacto. |
-| `TEST` aparece na tela mas o soco real não | O caminho placa → jogo está bom. O problema é o sensor, a fixação dele ou o limiar `amin`. |
+| `TEST` aparece na tela mas o soco real não | O caminho placa → jogo está bom. O problema é o sensor, o alinhamento da palheta com a fenda, ou a `vmin` alta demais. |
 
 ## O Arduino não manda pontos
 
@@ -182,7 +227,7 @@ firmwares de épocas diferentes dariam notas diferentes para o mesmo soco.
 | Segundo `HIT` na mesma rodada | Um soco por rodada. |
 | Menos de 900 ms desde o último aceito | O saco balança depois do impacto, e o MPU lê o balanço como uma sequência de eventos menores. |
 | Duração abaixo de 12 ms | Um toque, um esbarrão ou um tranco no gabinete duram muito menos que um soco. |
-| Pico abaixo da sensibilidade configurada | Idem. O valor sai do assistente de calibração. |
+| `REJECT,CURTO` num soco forte de verdade | O pulso ficou mais curto que `pulso_min_ms`. Confira na Central se a largura da palheta cadastrada bate com a real: é dela que sai o limite. |
 
 ### `SATURATION` não vira 9999
 
