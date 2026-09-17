@@ -40,8 +40,19 @@ const AVISO_DE_VOLTA := 15.0
 ## lenta e a premiação parecia apressada.
 ##
 ## Aqui é a parte rápida: o flash do impacto e a subida do número.
-const CONTAGEM_DURACAO := 0.86 ## Subida rápida, legível e sem sensação de espera.
-const IMPACTO_DURACAO := 0.38 ## Estado MEASURING: flash + onda de choque.
+## O NÚMERO SOBE E ACABA. Não há suspense a construir aqui.
+##
+## Esta era a queixa de "a projeção de pontos está lenta": do soco até o
+## número parado na tela eram 0,38 + 0,86 = mais de um segundo e um
+## quarto, com a pessoa parada olhando um número girar. Num fliperama o
+## suspense mora ANTES do golpe, não depois — depois do golpe o que se
+## quer é saber quanto valeu, e rápido.
+##
+## Meio segundo de subida é o tempo de ler quatro dígitos correndo e
+## ainda ver o último assentar. Abaixo disso o número aparece pronto e
+## some a graça; acima, vira espera.
+const CONTAGEM_DURACAO := 0.52
+const IMPACTO_DURACAO := 0.26 ## Estado MEASURING: flash + onda de choque.
 const RESULTADO_TIMEOUT := 12.0
 
 

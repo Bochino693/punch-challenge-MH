@@ -15,6 +15,8 @@ func _initialize() -> void:
 	_test_comemoracoes_do_ranking_sao_diferentes()
 	_test_statistics()
 	_test_ritmo()
+	_test_auto_escala()
+	_test_a_festa_cabe_num_quadro()
 	_test_calibracao()
 	# ---------------------------------------------- as fitas de LED
 	# O quinto campo do CONFIG e o teto das fitas, e ele e OPCIONAL nos
@@ -298,6 +300,173 @@ func _test_statistics() -> void:
 	assert(int(summary["average"]) == 6500)
 	assert(int(summary["best"]) == 8000)
 	assert(int(summary["top5_entries"]) == 1)
+
+# ---------------------------------------------------------- partículas
+## A FESTA INTEIRA TEM DE CABER NUM QUADRO — COM FOLGA.
+##
+## Este é o teste do "o confete desce travado". Medido, a versão anterior
+## gastava 31 ms só para DESENHAR as partículas de uma comemoração cheia.
+## Um quadro a 60 fps tem 16,7 ms no total: o confete sozinho custava
+## quase dois quadros, e a festa — justamente o momento em que o jogo
+## precisa impressionar — rodava a menos de 30 fps em qualquer máquina.
+##
+## Duas causas, as duas por partícula: um `Dictionary` cada (busca por
+## chave de texto, e lixo para o coletor recolher) e uma chamada de
+## desenho cada (novecentos comandos por quadro para a placa de vídeo).
+## Ver `PunchFX`.
+##
+## O limite aqui é de teste de fumaça, não de precisão: numa máquina de
+## integração o relógio é ruidoso e o número exato não se repete. O que
+## ele guarda é a ORDEM DE GRANDEZA — se alguém voltar a desenhar
+## partícula por partícula, o tempo sobe dez vezes e isto reprova.
+func _test_a_festa_cabe_num_quadro() -> void:
+	var tela := Control.new()
+	tela.size = Vector2(1080.0, 1920.0)
+	var fx := PunchFX.new()
+	var cores := [Color("ffd34e"), Color("ff9f36"), Color("33d7ff"), Color("7be495")]
+	# A festa de um campeão: chuva, canhões e a explosão do soco juntos.
+	for i in range(6):
+		fx.chuva_de_confete(1080.0, 40, cores, 1.2)
+		fx.confete(Vector2(540.0, 1880.0), 40, cores, 880.0)
+		fx.explosao(Vector2(540.0, 893.0), 120, cores, 1100.0)
+		fx.faiscas(Vector2(540.0, 893.0), 110, cores[0], 1000.0)
+		fx.estilhacos(Vector2(540.0, 893.0), 30, cores[1])
+		fx.raios(Vector2(540.0, 893.0), 26, cores[2], 780.0)
+		fx.poeira(Vector2(540.0, 1000.0), 30, cores[3], 380.0)
+	# O teto de partículas é respeitado — sem ele não há orçamento que valha.
+	assert(fx.quantidade() == PunchFX.LIMITE)
+
+	var inicio := Time.get_ticks_usec()
+	for q in range(240):
+		fx.atualizar(1.0 / 60.0)
+	var por_quadro := float(Time.get_ticks_usec() - inicio) / 240.0 / 1000.0
+	# Medido em 0,13 ms. Cinco milissegundos é folga de sobra e ainda
+	# reprova a volta ao `Dictionary`, que custava quatro vezes mais.
+	assert(por_quadro < 5.0)
+
+	# E as partículas morrem: uma festa que não termina enche o teto e
+	# nunca mais sai de lá, e aí toda a tela seguinte paga por ela.
+	for q in range(400):
+		fx.atualizar(1.0 / 60.0)
+	assert(fx.quantidade() == 0)
+	assert(not fx.vivo())
+	tela.free()
+
+# --------------------------------------------------------- auto-escala
+## A MÁQUINA APRENDE A FAIXA DO PRÓPRIO GABINETE.
+##
+## Este é o teste do "não consigo passar de mil". A faixa de fábrica
+## (0,30 a 5,20 m/s) foi medida na bancada; um gabinete cuja palheta mal
+## alcança 1,2 m/s vive no primeiro quinto dela, e todo mundo tira a
+## mesma nota baixa — sem que nada esteja quebrado e sem nenhuma pista na
+## tela de por quê.
+func _test_auto_escala() -> void:
+	# Um gabinete lento: os socos vão de 0,45 a 1,25 m/s, com a maioria
+	# em torno de 0,85. É o caso real que chegou.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 17092026
+	var salao: Array[float] = []
+	for i in range(160):
+		salao.append(clampf(rng.randfn(0.85, 0.22), 0.40, 1.30))
+
+	var ordenado := salao.duplicate()
+	ordenado.sort()
+	var mediana: float = ordenado[ordenado.size() / 2]
+
+	# ANTES: com a régua de fábrica, o cliente mediano tira menos de mil.
+	# Não é uma estatística escolhida a dedo — é literalmente a frase que
+	# chegou, "não consigo passar de mil", escrita como teste.
+	assert(ScoreCurve.points_from_speed(
+		mediana, ScoreCurve.DEFAULT_MIN_SPEED, ScoreCurve.DEFAULT_MAX_SPEED
+	) < 1000)
+
+	# A régua aprende, um passo por rodada, a partir da de fábrica.
+	var escala := AutoEscala.new()
+	var vmin := ScoreCurve.DEFAULT_MIN_SPEED
+	var vmax := ScoreCurve.DEFAULT_MAX_SPEED
+	var vref := vmin + (vmax - vmin) * ScoreCurve.REFERENCIA_PADRAO
+	for v in salao:
+		escala.registrar(v)
+		var novo := escala.passo(vmin, vref, vmax)
+		if not novo.is_empty():
+			var limpo := ScoreCurve.sanitize(
+				float(novo["vmin"]), float(novo["vmax"]),
+				ScoreCurve.DEFAULT_CONTRASTE, 0.0, float(novo["vref"])
+			)
+			vmin = limpo["min_speed"]
+			vmax = limpo["max_speed"]
+			vref = limpo["ref_speed"]
+
+	# DEPOIS: a régua descreve o gabinete, e a escala inteira volta a ser
+	# usada. A mediana do salão passa a valer perto de meio placar — é
+	# esta linha que significa "equilibrado", e é o que a régua aprendida
+	# entrega em QUALQUER gabinete, sem ninguém configurar nada.
+	var nota_da_mediana := ScoreCurve.points_from_speed(
+		mediana, vmin, vmax, ScoreCurve.DEFAULT_CONTRASTE, 0.0, vref
+	)
+	assert(nota_da_mediana > 3200)
+	assert(nota_da_mediana < 6800)
+
+	# E O SOCO MAIS FORTE DO SALÃO CHEGA PERTO DO TOPO, sem entregá-lo.
+	var mais_forte: float = ordenado[ordenado.size() - 1]
+	var nota_do_forte := ScoreCurve.points_from_speed(
+		mais_forte, vmin, vmax, ScoreCurve.DEFAULT_CONTRASTE, 0.0, vref
+	)
+	assert(nota_do_forte > 7000)
+	assert(nota_do_forte <= GameDef.SCORE_MAX)
+
+	# MAIS FORTE CONTINUA VALENDO MAIS. A régua pode se mexer, mas dentro
+	# de uma mesma régua a ordem é sagrada — é a promessa do jogo.
+	var anterior := -1
+	for i in range(0, 300):
+		var v := float(i) * 0.01
+		var pts := ScoreCurve.points_from_speed(
+			v, vmin, vmax, ScoreCurve.DEFAULT_CONTRASTE, 0.0, vref
+		)
+		assert(pts >= anterior)
+		anterior = pts
+
+	# ----------------------------------------------------- as travas
+	# 1. SEM AMOSTRA ELA NÃO OPINA. Um gabinete recém-ligado usa o que
+	#    está configurado, e não uma média de três golpes.
+	var nova := AutoEscala.new()
+	for i in range(AutoEscala.MINIMO_PARA_VALER - 1):
+		nova.registrar(1.0)
+		assert(nova.passo(0.3, 3.0, 5.2).is_empty())
+	nova.registrar(1.0)
+	assert(not nova.passo(0.3, 3.0, 5.2).is_empty())
+
+	# 2. DESLIGADA, NÃO MEXE EM NADA.
+	nova.ligada = false
+	assert(nova.passo(0.3, 3.0, 5.2).is_empty())
+	nova.ligada = true
+
+	# 3. O PASSO É LIMITADO. Uma criança batendo dez vezes seguidas não
+	#    pode derrubar a régua e fazer o adulto seguinte tirar 9999 — a
+	#    tabela de recordes do dia iria junto.
+	var firme := AutoEscala.new()
+	for i in range(60):
+		firme.registrar(0.5)
+	var um_passo := firme.passo(0.3, 3.0, 5.2)
+	assert(not um_passo.is_empty())
+	# O teto anda em direção ao alvo, mas longe de chegar nele de uma vez.
+	assert(float(um_passo["vmax"]) > 4.0)
+	assert(float(um_passo["vmax"]) < 5.2)
+
+	# 4. A MEMÓRIA NÃO CRESCE SEM LIMITE, e sobrevive ao disco.
+	var cheia := AutoEscala.new()
+	for i in range(AutoEscala.JANELA * 2):
+		cheia.registrar(1.0 + float(i % 7) * 0.1)
+	assert(cheia.quantos() == AutoEscala.JANELA)
+	var copia := AutoEscala.new()
+	copia.carregar(cheia.para_salvar())
+	assert(copia.quantos() == cheia.quantos())
+	assert(copia.ligada == cheia.ligada)
+	# Lixo gravado por uma versão anterior não entra: uma velocidade
+	# absurda deslocaria a régua inteira sem nenhuma explicação na tela.
+	var suja := AutoEscala.new()
+	suja.carregar({"ligada": true, "socos": [1.0, -3.0, 999.0, 2.0, 0.0]})
+	assert(suja.quantos() == 2)
 
 # --------------------------------------------------------------- ritmo
 ## O PASSO DO JOGO. Ver `scripts/ritmo.gd` para o defeito que ele

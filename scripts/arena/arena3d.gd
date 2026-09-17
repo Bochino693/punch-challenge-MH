@@ -383,7 +383,67 @@ func instalar(cena: PackedScene) -> bool:
 	lutador.name = "Lutador"
 	_mundo.add_child(lutador)
 	lutador.montar(corpo as Node3D)
+	_pintar_de_desenho(corpo)
 	return true
+
+# -------------------------------------------------------- o traço
+const TOON := preload("res://shaders/lutador_toon.gdshader")
+const CONTORNO := preload("res://shaders/lutador_contorno.gdshader")
+
+## Os materiais em uso, para o clarão do soco poder acendê-los.
+var _peles: Array[ShaderMaterial] = []
+
+## O LUTADOR VIRA DESENHO — sem trocar o modelo.
+##
+## O GLB chega com material comum: luz contínua e brilho especular. Num
+## corpo feito de formas redondas isso põe uma bolota clara em cima de
+## cada volume, e dezenas de bolotas claras em superfície lisa é a
+## aparência exata de brinquedo de plástico. Era essa a queixa.
+##
+## O conserto não é modelar outro boneco: é PINTAR este. Cada superfície
+## do GLB troca o material por um de bandas (`lutador_toon`), levando
+## consigo a COR que já tinha — a paleta do personagem é a mesma, o que
+## muda é como a luz cai nela. E cada material ganha uma segunda passada
+## que desenha o contorno (`lutador_contorno`).
+##
+## Trocar a pintura e não a malha tem uma vantagem que vale dizer: quem
+## operar a máquina continua podendo substituir `lutador.glb` por outro
+## boneco, e o novo nasce desenhado do mesmo jeito, sem precisar de
+## ninguém preparando material.
+func _pintar_de_desenho(corpo: Node3D) -> void:
+	_peles.clear()
+	for malha in _malhas(corpo):
+		var geometria := malha.mesh
+		if geometria == null:
+			continue
+		for s in range(geometria.get_surface_count()):
+			# A COR VEM DO MATERIAL ORIGINAL. Sem isto o boneco inteiro
+			# sairia de uma cor só — perderíamos a luva vermelha, o
+			# calção preto e a pele, que são o personagem.
+			var cor := Color(0.9, 0.62, 0.42)
+			var antigo := malha.get_active_material(s)
+			if antigo is BaseMaterial3D:
+				cor = (antigo as BaseMaterial3D).albedo_color
+			var tinta := ShaderMaterial.new()
+			tinta.shader = TOON
+			tinta.set_shader_parameter("cor_base", cor)
+			var traco := ShaderMaterial.new()
+			traco.shader = CONTORNO
+			# O CONTORNO ACOMPANHA A COR DA PEÇA, bem escurecido. Um preto
+			# só, igual para tudo, achata a figura; um traço que puxa para
+			# a cor do que está contornando é o que ilustrador faz.
+			traco.set_shader_parameter("cor", cor.darkened(0.86))
+			tinta.next_pass = traco
+			malha.set_surface_override_material(s, tinta)
+			_peles.append(tinta)
+
+func _malhas(no: Node) -> Array[MeshInstance3D]:
+	var achadas: Array[MeshInstance3D] = []
+	if no is MeshInstance3D:
+		achadas.append(no as MeshInstance3D)
+	for filho in no.get_children():
+		achadas.append_array(_malhas(filho))
+	return achadas
 
 func modelo_avancado() -> bool:
 	return lutador != null and lutador.tem_esqueleto()
@@ -480,21 +540,60 @@ func _camera() -> void:
 		sacode = Vector3(
 			randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-0.4, 0.4)
 		) * _tremor * 0.055
-	var pos := Vector3(passeio, 1.28 + sin(_relogio * 0.21) * 0.05, 2.95 - _empurrao * 0.24)
-	var mira := Vector3(0.0, 1.06 + _empurrao * 0.06, 0.0)
+	# O ENQUADRAMENTO É UM POUCO MAIS FECHADO E UM POUCO MAIS ALTO.
+	#
+	# A câmera estava mostrando o lutador inteiro com folga em volta, e o
+	# rosto — que é a parte que dá personagem a um personagem — ficava do
+	# tamanho de uma moeda dentro de uma janela que já é pequena na tela.
+	# Chegando perto e subindo a mira para a altura do peito, o tronco e a
+	# cabeça ocupam o quadro, que é onde o soco acerta e onde a reação
+	# acontece. Os pés continuam no quadro para a queda do nocaute ter
+	# para onde cair.
+	var pos := Vector3(passeio, 1.34 + sin(_relogio * 0.21) * 0.05, 2.72 - _empurrao * 0.24)
+	var mira := Vector3(0.0, 1.16 + _empurrao * 0.06, 0.0)
 	# QUANDO ELE CAI, A CÂMERA VAI JUNTO. Ficar parada na altura do peito
 	# depois do nocaute deixaria a moldura com um ringue vazio e o corpo
 	# fora de quadro — que foi exatamente o que aconteceu na primeira
 	# montagem. Subir e olhar para baixo é o que qualquer transmissão faz.
 	var caido := lutador.queda if lutador != null else 0.0
 	if caido > 0.001:
+		# O NOCAUTE É O MELHOR MOMENTO DO JOGO, E A CÂMERA ESTAVA PERDENDO.
+		#
+		# Ela subia para 2,24 m e mirava em z = −0,70, que é ATRÁS de onde
+		# o corpo cai: o lutador acabava pequeno e encostado no alto do
+		# quadro, com meia janela de lona vazia embaixo. Quem acabou de
+		# derrubar alguém quer ver o corpo no chão, grande e no meio.
+		#
+		# Mais baixa, mais perto e mirando onde ele de fato está.
+		# E ELA VAI PARA O LADO, não para cima.
+		#
+		# De frente e de cima, um corpo caído de costas é visto pela sola
+		# dos pés: o tronco encurta na perspectiva, a cabeça fica longe e
+		# escondida atrás das luvas, e a imagem não diz "nocaute" — diz
+		# "alguma coisa no chão". De lado é como toda transmissão de boxe
+		# mostra um lutador na lona, e é a única posição em que o corpo
+		# inteiro aparece deitado, do pé à cabeça.
 		var t := ease(caido, 0.5)
-		pos = pos.lerp(Vector3(0.18, 2.24, 2.70), t)
-		mira = mira.lerp(Vector3(0.0, 0.30, -0.70), t)
+		# O corpo passa a ocupar de (0, 0,1, 0) nos pés a (0, 0,34, −1,6)
+		# na cabeça. A câmera olha o meio disso, de três quartos: numa
+		# janela em pé, um corpo deitado na diagonal cabe; atravessado,
+		# não cabe.
+		# Medido com o corpo já no chão: ele ocupa de (−0,18; −0,03; −1,66)
+		# a (0,73; 0,45; −0,10), com o centro em (0,28; 0,21; −0,88). A
+		# mira é esse centro, e não o meio do ringue — mirar no ringue era
+		# o que deixava o corpo fora do quadro.
+		pos = pos.lerp(Vector3(1.38, 1.74, 1.92), t)
+		mira = mira.lerp(Vector3(-0.30, 0.34, -0.66), t)
 	camera.position = pos + sacode
 	camera.look_at(mira, Vector3.UP)
 
 func _luzes() -> void:
+	# O CLARÃO TAMBÉM ENTRA NA PINTURA. Com `unshaded`, o lutador não
+	# enxerga mais as luzes da cena — se o clarão ficasse só nelas, o
+	# ringue acenderia no soco e o corpo, que é o que levou o golpe,
+	# ficaria igual.
+	for tinta in _peles:
+		tinta.set_shader_parameter("clarao", _clarao)
 	# O golpe ACENDE a arena por um instante, pelas luzes de contorno. Um
 	# clarão branco por cima lavaria a imagem; puxar o contorno mantém as
 	# cores e ainda assim diz "explodiu".

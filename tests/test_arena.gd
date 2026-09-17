@@ -39,6 +39,7 @@ func _initialize() -> void:
 	_test_o_dano_soma_e_nao_passa_de_um()
 	_test_cada_forca_tem_reacao_propria()
 	_test_desdenho_usa_a_nota_e_respeita_a_lona()
+	_test_o_nocaute_derruba_de_verdade()
 	_test_o_nocaute_nao_afunda_o_lutador()
 	_test_levantar_devolve_o_lutador_para_cima_da_lona()
 	_test_as_frases_cobrem_todos_os_niveis()
@@ -193,6 +194,57 @@ func _test_desdenho_usa_a_nota_e_respeita_a_lona() -> void:
 	_ok(bool(ko["nocaute"]), "golpe forte precisa derrubar")
 	var no_chao := l.bater(0.10, false, 2000)
 	_ok(not bool(no_chao["desdenhou"]), "quem está na lona não pode desdenhar")
+	l.free()
+
+## O NOCAUTE PRECISA DERRUBAR.
+##
+## Medido osso a osso: durante a animação `knockout` que veio no GLB, a
+## cabeça do lutador sai de 1,59 m para 1,63 m e anda doze centímetros
+## para trás. Ele não cai — inclina e volta. E o jogo inteiro acreditava:
+## tocava o som de queda, anunciava NOCAUTE, gritava a torcida, levava a
+## câmera para a altura da lona e esperava 3,35 s "no chão" com o boneco
+## em pé o tempo todo.
+##
+## A queda passou a ser feita no osso-raiz (`Lutador3D._aplicar_queda`).
+## Este teste guarda as duas coisas que aquilo precisa cumprir, e nenhuma
+## delas dá para ver num quadro isolado.
+func _test_o_nocaute_derruba_de_verdade() -> void:
+	var l := _lutador()
+	if l._esqueleto == null or l._osso_raiz < 0:
+		l.free()
+		return
+	var em_pe := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	l.bater(1.0, true, 9600)
+	for i in range(120):
+		l.atualizar(1.0 / 60.0)
+	_ok(l.queda > 0.9, "depois do nocaute o lutador tem de estar no chão")
+	var deitado := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	var angulo := rad_to_deg(em_pe.angle_to(deitado))
+	_ok(angulo > 55.0, "o corpo tem de girar de verdade (girou %.0f°)" % angulo)
+
+	# E A POSE NÃO PODE SE ACUMULAR.
+	#
+	# A primeira versão lia a pose e multiplicava o giro nela a cada
+	# quadro. Enquanto a animação toca ela reescreve a pose antes de cada
+	# acréscimo e nada aparece; mas a animação de nocaute dura 1,93 s e
+	# NÃO SE REPETE, e quando ela acaba ninguém mais reescreve a pose: o
+	# mesmo giro passa a ser multiplicado sessenta vezes por segundo em
+	# cima de si mesmo. O lutador dava voltas e sumia do ringue em meio
+	# segundo.
+	#
+	# Aqui a queda é fixada e a função chamada duzentas vezes seguidas,
+	# sem o resto do quadro no meio: com a pose escrita de forma absoluta
+	# a partir da pose guardada, chamar uma vez ou duzentas dá no mesmo.
+	# Com a versão que acumulava, isto gira mais de mil graus.
+	l.queda = 1.0
+	l._aplicar_queda()
+	var uma_vez := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	for i in range(200):
+		l.queda = 1.0
+		l._aplicar_queda()
+	var duzentas := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	_perto(rad_to_deg(uma_vez.angle_to(duzentas)), 0.0, 0.01,
+		"a pose da queda tem de ser absoluta, e não somar a cada chamada")
 	l.free()
 
 func _test_o_nocaute_nao_afunda_o_lutador() -> void:

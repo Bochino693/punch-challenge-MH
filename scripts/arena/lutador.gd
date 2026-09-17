@@ -65,6 +65,20 @@ const ALIASES := {
 	"get_up": ["get_up", "stand_up", "recover"],
 }
 
+## A CABEÇA DE DESENHO.
+##
+## O modelo veio com proporção realista: cabeça pequena, ombros largos,
+## luvas enormes. Em pé na guarda, as duas luvas cobrem a cabeça inteira e
+## o jogador nunca vê um rosto — e é impossível gostar de um personagem
+## cujo rosto nunca aparece. Toda linguagem de desenho resolve isso do
+## mesmo jeito, e é o mais barato que existe: cabeça maior.
+##
+## Um terço a mais basta. Acima disso o pescoço aparece fino demais e o
+## boneco vira caricatura de si mesmo.
+const ESCALA_DA_CABECA := 1.34
+const OSSO_DA_CABECA := "head"
+
+var _osso_cabeca := -1
 var _juntas: Dictionary = {}
 var _repouso: Dictionary = {}
 var _raiz: Node3D = null
@@ -91,6 +105,8 @@ func montar(corpo: Node3D) -> void:
 	_esqueleto = _achar_esqueleto(corpo)
 	_indexar_animacoes()
 	_ajustar_loops()
+	_osso_cabeca = _esqueleto.find_bone(OSSO_DA_CABECA) if _esqueleto != null else -1
+	_osso_raiz = _esqueleto.find_bone(OSSO_RAIZ) if _esqueleto != null else -1
 	for nome in JUNTAS:
 		var no := corpo.find_child(nome, true, false)
 		if no is Node3D:
@@ -229,6 +245,12 @@ func bater(forca: float, derruba := false, pontos := -1) -> Dictionary:
 		_tempo_na_lona = 0.0
 		_tempo_levantar = _duracao("get_up", 1.0)
 		_tempo_reacao = TEMPO_NA_LONA + _tempo_levantar
+		# A pose de onde o tombo parte, guardada uma vez. Ver `_aplicar_queda`.
+		if _esqueleto != null and _osso_raiz >= 0:
+			_raiz_antes_do_tombo = Transform3D(
+				Basis(_esqueleto.get_bone_pose_rotation(_osso_raiz)),
+				_esqueleto.get_bone_pose_position(_osso_raiz)
+			)
 		_tocar("knockout", 0.08, ritmo_da_queda)
 	elif not _caindo:
 		# A nota é a linguagem do jogador. Abaixo de 6.000 o adversário
@@ -292,19 +314,116 @@ func atualizar(delta: float) -> void:
 	elif _tempo_reacao <= 0.0:
 		_tocar("guard" if em_guarda else "idle", 0.20)
 
-	if _animador != null and not _animacoes.is_empty():
+	_agrandar_a_cabeca()
+	if _animador == null or _animacoes.is_empty():
+		_pose_fallback()
+	# A QUEDA É A ÚLTIMA COISA, e vale nos dois caminhos: ela multiplica
+	# por cima da pose que a animação (ou o `_pose_fallback`) acabou de
+	# escrever, em vez de disputar com ela.
+	_aplicar_queda()
+
+## O NOCAUTE PRECISOU SER FEITO AQUI, PORQUE A ANIMAÇÃO NÃO O FAZ.
+##
+## Medido, osso a osso: durante a animação chamada `knockout`, a cabeça do
+## lutador sai de 1,59 m para 1,63 m de altura e anda DOZE CENTÍMETROS
+## para trás. Ele não cai. Ele se inclina um pouco e volta.
+##
+## E o resto do jogo acreditava na promessa: tocava o som de queda,
+## anunciava NOCAUTE, gritava a torcida, jogava a câmera para a altura da
+## lona e esperava 3,35 s "no chão" antes de mandar levantar — com o
+## boneco em pé o tempo todo. Da plateia, o momento mais importante do
+## jogo era o adversário balançando de leve enquanto a câmera olhava para
+## um pedaço vazio de tapete.
+##
+## Não dá para regravar a animação daqui, e não precisa: o tombo é uma
+## rotação do corpo inteiro em torno dos pés, que é fisicamente o que um
+## nocaute é. O esqueleto continua tocando a animação de queda por cima —
+## braços abrindo, cabeça virando —, e o corpo vai ao chão de verdade.
+##
+## O giro é em torno da ORIGEM do nó raiz, que fica nos pés: 78° para trás
+## levam a cabeça de 1,64 m de altura para 0,34 m, a um metro e meio atrás
+## dos calcanhares. É uma queda de costas, que é como se cai quando se
+## leva um soco de frente.
+## O TOMBO É NO OSSO-RAIZ, E NÃO NO NÓ.
+##
+## A primeira versão girava o nó do personagem, que é o caminho óbvio e
+## está errado: o corpo é uma malha COM ESQUELETO, e girar o nó por fora
+## do esqueleto fez onze das treze superfícies simplesmente sumirem da
+## tela — sobravam as duas botas. Medido e confirmado nos dois sentidos:
+## sem o giro, o corpo inteiro desenha; com ele, só as botas.
+##
+## Girando o OSSO-RAIZ, que é o pai de todos os outros, o tombo passa a
+## ser uma pose de esqueleto como qualquer outra — exatamente o que o
+## motor espera de uma malha com pele, e o mesmo caminho que as animações
+## já usam. O corpo inteiro vai ao chão e continua desenhando.
+const ANGULO_DA_QUEDA_GRAUS := 78.0
+const OSSO_RAIZ := "root"
+
+## O CORPO DEITADO PRECISA SUBIR, NÃO DESCER.
+##
+## Girar em torno dos pés põe a LINHA DO ESQUELETO rente à lona — e o
+## esqueleto é o meio do corpo, não a parte de baixo dele. Com os ossos a
+## doze centímetros do chão e um tronco de vinte de espessura, metade do
+## lutador ficaria DENTRO do tapete. Dezoito centímetros é meia espessura
+## de corpo, e é o que o faz deitar SOBRE a lona.
+const SUBIDA_DA_QUEDA := 0.18
+
+var _osso_raiz := -1
+## A pose do osso-raiz no instante em que o nocaute começou.
+var _raiz_antes_do_tombo := Transform3D()
+
+## A POSE DO TOMBO É ABSOLUTA, E NÃO UM ACRÉSCIMO A CADA QUADRO.
+##
+## A primeira tentativa lia a pose atual e multiplicava o giro nela. Isso
+## funciona enquanto a animação está tocando — ela reescreve a pose antes
+## de cada acréscimo. Mas a animação de nocaute dura 1,93 s e NÃO SE
+## REPETE: quando ela acaba, ninguém mais reescreve a pose, e o mesmo
+## giro passa a ser multiplicado sessenta vezes por segundo em cima de si
+## mesmo. O lutador dava voltas e desaparecia do ringue em meio segundo.
+##
+## Guardando a pose de quando o golpe caiu e escrevendo sempre
+## `tombo(t) × guardada`, o resultado depende só de `t` — pode ser
+## chamado uma vez ou mil, dá no mesmo.
+func _aplicar_queda() -> void:
+	if _esqueleto == null or _osso_raiz < 0 or queda <= 0.001:
 		return
-	_pose_fallback()
+	# `ease(…, 0.55)` sai depressa e assenta: um corpo que cai ganha
+	# velocidade e para de uma vez quando encontra a lona.
+	var t := ease(clampf(queda, 0.0, 1.0), 0.55)
+	var tombo := Quaternion(Vector3.RIGHT, -deg_to_rad(ANGULO_DA_QUEDA_GRAUS) * t) \
+		* Quaternion(Vector3.FORWARD, _lado * 0.20 * t)
+	_esqueleto.set_bone_pose_rotation(
+		_osso_raiz, tombo * _raiz_antes_do_tombo.basis.get_rotation_quaternion()
+	)
+	_esqueleto.set_bone_pose_position(
+		_osso_raiz, _raiz_antes_do_tombo.origin + Vector3(0.0, SUBIDA_DA_QUEDA * t, 0.0)
+	)
+
+
+
+## A CABEÇA É REDIMENSIONADA DEPOIS DA ANIMAÇÃO, todo quadro.
+##
+## E tem de ser depois: o tocador de animação escreve a pose de cada osso
+## a cada quadro, então um ajuste feito uma vez na montagem seria apagado
+## no primeiro quadro em que o boneco se mexesse. Fazendo aqui, no fim de
+## `atualizar` e portanto depois de o tocador ter escrito, a escala vale
+## em todas as nove animações sem precisar tocar em nenhuma delas.
+func _agrandar_a_cabeca() -> void:
+	if _esqueleto == null or _osso_cabeca < 0:
+		return
+	_esqueleto.set_bone_pose_scale(_osso_cabeca, Vector3.ONE * ESCALA_DA_CABECA)
 
 func _pose_fallback() -> void:
 	if _raiz == null:
 		return
+	# O TOMBO SAIU DAQUI. Ele é de `_aplicar_queda`, que roda logo depois
+	# e vale para os dois caminhos — com animação e sem. Dois lugares
+	# girando o mesmo corpo é como a queda saía com o dobro do ângulo no
+	# modelo sem esqueleto e nenhum no modelo com.
 	var raiz: Transform3D = _repouso.get("__raiz__", _raiz.transform)
 	var impacto := ease(_recuo, 0.35)
-	var tombo := ease(queda, 0.6)
-	raiz.origin.z -= impacto * (0.08 + _forca_do_recuo * 0.26) + tombo * 0.18
+	raiz.origin.z -= impacto * (0.08 + _forca_do_recuo * 0.26)
 	raiz.origin.x += _lado * impacto * 0.06
-	raiz.basis = raiz.basis * Basis.from_euler(Vector3(-tombo * 1.30, 0.0, _lado * tombo * 0.20))
 	_raiz.transform = raiz
 	_junta("Tronco", Vector3(-impacto * (0.12 + _forca_do_recuo * 0.40), _lado * impacto * 0.16, 0.0))
 	_junta("Cabeca", Vector3(-impacto * (0.22 + _forca_do_recuo * 0.60), _lado * impacto * 0.30, 0.0))
