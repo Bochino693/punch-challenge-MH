@@ -98,6 +98,7 @@ func run() -> void:
 	_test_laco_de_atracao()
 	_test_teto_de_efeitos()
 	_test_vigia_mede_o_pior_quadro()
+	_test_todas_as_camadas_andam_no_mesmo_relogio()
 	_test_porta_fixa()
 	_test_botoes_do_arduino_ponta_a_ponta()
 	await _test_ponte_por_processo()
@@ -849,6 +850,48 @@ func _ponte_ate(ponte: PonteProcessoLink, condicao: Callable) -> bool:
 	return false
 
 # ------------------- o vigia mede o PIOR quadro, e nao a media
+func _test_todas_as_camadas_andam_no_mesmo_relogio() -> void:
+	"""Fundo, moldura e letreiro tinham cada um o SEU `_process`.
+
+	Tres nos somando o delta CRU, cada um por conta propria, mais o jogo
+	somando o dele: quatro relogios para uma cena so. Basta um quadro
+	engasgado cair diferente em dois deles para a fagulha do fundo andar
+	um tanto e a lampada da moldura outro -- e e justamente nas camadas
+	lentas e continuas que o olho enxerga essa diferenca. Agora `main.gd`
+	adianta os tres com o passo ja suavizado do `Ritmo`.
+
+	A troca tem um modo de falhar proprio, e ele ja aconteceu durante
+	esta mudanca: desligar o `_process` de um no e esquecer de chama-lo
+	do laco principal. O resultado e uma camada que simplesmente PARA --
+	a moldura congelada, o brilho do letreiro travado -- sem erro nenhum
+	na tela. Este teste existe para esse caso, e para nada mais.
+	"""
+	# Nenhuma das tres pode ter voltado a ter relogio proprio.
+	assert(not jogo.fundo.is_processing())
+	assert(not jogo.moldura.is_processing())
+	assert(not jogo.letreiro_do_nome.is_processing())
+
+	var fundo_antes: float = jogo.fundo.tempo
+	var moldura_antes: float = jogo.moldura.tempo
+	var letreiro_antes: float = jogo.letreiro_do_nome._tempo
+
+	# O laco de verdade, um quadro. `set_process(false)` desliga o
+	# automatico, nao a funcao -- entao chamar aqui exercita o mesmo
+	# caminho que roda na maquina.
+	jogo._process(1.0 / 60.0)
+
+	assert(jogo.fundo.tempo > fundo_antes)
+	assert(jogo.moldura.tempo > moldura_antes)
+	assert(jogo.letreiro_do_nome._tempo > letreiro_antes)
+
+	# E os tres andaram EXATAMENTE o mesmo tanto: e isso que faz a cena
+	# ser uma cena, e nao tres animacoes vizinhas.
+	var passo_fundo: float = jogo.fundo.tempo - fundo_antes
+	var passo_moldura: float = jogo.moldura.tempo - moldura_antes
+	var passo_letreiro: float = jogo.letreiro_do_nome._tempo - letreiro_antes
+	assert(is_equal_approx(passo_fundo, passo_moldura))
+	assert(is_equal_approx(passo_fundo, passo_letreiro))
+
 func _test_vigia_mede_o_pior_quadro() -> void:
 	"""Uma tela que engasga uma vez a cada vinte quadros tem media otima.
 

@@ -147,6 +147,51 @@ static func _floats(parts: PackedStringArray, from: int, count: int) -> Array:
 		out.append(parts[i].strip_edges().to_float())
 	return out
 
+## O TETO DE PLAUSIBILIDADE, EM m/s — E POR QUE ELE MORA AQUI.
+##
+## O firmware recusa como `CURTO` qualquer pulso mais rápido do que o
+## `pulsoMinUs` que recebe no CONFIG, e recusa SEPARADAMENTE qualquer
+## velocidade acima de `max(8, velocidadeMax * 2,2)`. São dois limites
+## para a mesma ideia — "isto é rápido demais para ser um soco" — e,
+## quando discordam, o mais apertado vence sem dizer o nome dele: a placa
+## responde `CURTO` a um soco perfeitamente válido, e do lado de fora
+## parece que o sensor simplesmente não viu.
+##
+## Esta função é a regra, escrita uma vez só. `pulso_minimo_ms` a
+## converte em tempo usando a largura da palheta, e é assim que os dois
+## limites passam a tropeçar exatamente no mesmo soco.
+static func velocidade_teto(max_speed: float) -> float:
+	return maxf(8.0, maxf(max_speed, 0.0) * 2.2)
+
+## O PULSO MÍNIMO QUE O FIRMWARE DEVE EXIGIR, em milissegundos.
+##
+## A palheta atravessa a fenda: a velocidade é a largura dela dividida
+## pela duração do bloqueio. Quanto mais rápido o soco, MAIS CURTO o
+## pulso — então o pulso mínimo é um limite SUPERIOR de velocidade, e não
+## de força. É essa inversão que fazia a regulagem à mão virar armadilha:
+## um número aumentado "para ficar mais sensível" apertava o teto e
+## passava a recusar justamente os socos fortes.
+##
+## Por isso ele é DERIVADO, e nunca escolhido a dedo: largura da palheta
+## e teto calibrado entram, milissegundos saem.
+static func pulso_minimo_ms(flag_width_m: float, max_speed: float) -> float:
+	var largura := clampf(flag_width_m, 0.005, 0.100)
+	var ms := largura / velocidade_teto(max_speed) * 1000.0
+	return clampf(ms, 0.15, 20.0)
+
+## A JANELA QUE ESTA MONTAGEM CONSEGUE MEDIR, em m/s, dada a largura da
+## palheta e o pulso mínimo em vigor. A Central mostra isto ao lado dos
+## dois ajustes, porque "20 mm" e "1,75 ms" não dizem nada sozinhos —
+## "mede de 0,07 a 11,4 m/s" diz tudo, e diz na hora se a faixa de
+## pontuação cabe dentro do que o sensor enxerga.
+static func janela_medivel(flag_width_m: float, min_pulse_ms: float) -> Vector2:
+	var largura := clampf(flag_width_m, 0.005, 0.100)
+	var rapida := largura / (clampf(min_pulse_ms, 0.15, 20.0) / 1000.0)
+	# 300 ms é o `PULSO_MAX_US` do firmware: mais lento que isso ele
+	# descarta como `SUSTENTADO` — a palheta parou dentro da fenda.
+	var lenta := largura / 0.300
+	return Vector2(lenta, rapida)
+
 static func build_config(
 	polarity: String, flag_width_m: float, min_speed: float, min_pulse_ms: float, max_speed := 0.0
 ) -> String:

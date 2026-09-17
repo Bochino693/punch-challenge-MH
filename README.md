@@ -267,9 +267,10 @@ momento pelo qual o cliente pagou.
 - A marca da casa montada como letreiro de parque: placa creme, moldura
   marinho e lâmpadas correndo em volta.
 - Contagem regressiva animada `3, 2, 1` e tela de espera que aguarda o soco sem consumir a ficha.
-- Pontuação de 0000 a 9999 baseada em curva gradual `smoothstep + gamma`.
-  O padrão difícil usa expoente `2,00`; o cálculo antigo com `0,8`, que
-  favorecia demais golpes médios, não é mais utilizado.
+- Pontuação de 0000 a 9999 por uma curva de **três âncoras**: a
+  velocidade mínima paga 0, o soco de referência paga 5000 e a máxima
+  paga 9999 — as três valem com qualquer contraste. Ver *Calibração da
+  pontuação*.
 - Oito níveis de golpe, cada um com cor, animação, partículas, tremor e som próprios.
 - Ranking das cinco melhores marcas, persistente, com foto local do
   jogador quando a câmera está disponível e com a posição
@@ -356,10 +357,10 @@ apenas pelo diagnóstico de dispositivos e privacidade do Windows.
 | **Modo de operação** | Livre ou 1 ficha por partida. |
 | **Botões do gabinete** | Mapeamento da placa Zero Delay: aperte o botão de verdade e o jogo grava controle, índice e nome. Um contador por botão prova que pegou. |
 | **Simulação de bancada** | A chave que libera a barra de espaço. Desligada de fábrica. |
-| **Velocidade e dificuldade** | Mínima, máxima, expoente e zona morta — com a curva desenhada. |
+| **A régua do soco** | Velocidade mínima, máxima e o **soco de referência** (a que paga 5000), mais o contraste — com a curva desenhada. |
 | **Os oito níveis** | Régua de leitura. Mostra a desproporção real: os quatro níveis de cima ocupam um quinto da escala. |
 | **Assistente de calibração** | Mede a máquina em quatro passos em vez de regular por tentativa e erro. |
-| **Sensor e firmware** | Porta serial, eixo do golpe, raio do braço, sensibilidade e envio de configuração. |
+| **Sensor e firmware** | Porta serial, polaridade do sinal, largura da palheta e envio de configuração. O **pulso mínimo** aparece como leitura: ele é calculado, não escolhido. |
 | **Câmera e som** | Prévia ao vivo, troca de câmera, foto de teste, volumes de trilha e efeitos, soco de teste. |
 | **Dados** | Ranking, estatísticas, telemetria, contadores dos botões e o que apagar. |
 
@@ -377,26 +378,69 @@ cobrir uma área de toque.
 Use o **assistente**, na Central Técnica → GOLPE → *Assistente de
 calibração*. Quatro passos:
 
-1. **Repouso** — não encoste no saco por quatro segundos. Mede o ruído do
-   sensor parado, que é o piso da sensibilidade.
+1. **Repouso** — não encoste no saco por quatro segundos. Mede o nível de
+   sinal do sensor parado (no LM393 é a leitura de A0, de 0 a 1 — não é
+   uma aceleração, e não entra em conta nenhuma: serve para conferir a
+   olho se o sensor está enxergando).
 2. **Cinco golpes fracos** — bata de leve, como quem testa.
 3. **Cinco golpes fortes** — bata com tudo, como o melhor cliente da noite.
-4. **Sugestão** — velocidade mínima, máxima e sensibilidade, cada uma com
-   o motivo escrito ao lado, e a curva **desenhada** antes de salvar.
+4. **Sugestão** — as três âncoras e o pulso mínimo, cada um com o motivo
+   escrito ao lado, e a curva **desenhada** antes de salvar.
 
 A conta usa **percentis**, não mínimo e máximo: em cinco socos, um
 escorrega no saco e outro pega de raspão, e com o extremo a calibração
 inteira dependeria do pior e do melhor golpe do dia. O piso desce 15 %
 abaixo do percentil 20 dos fracos, para quem bate de leve ver *algum*
-ponto; o teto sobe 8 % acima do percentil 80 dos fortes, para 9999
+ponto; o teto sobe 22 % acima do percentil 80 dos fortes, para 9999
 continuar raro — se o teto fosse o golpe mais forte já medido, o primeiro
-cliente forte zeraria o desafio na primeira noite.
+cliente forte zeraria o desafio na primeira noite. O **soco de
+referência** cai entre o fraco típico e o forte típico, mais perto do
+forte: quem calibra dá o golpe fraco de propósito mais fraco do que
+qualquer cliente daria.
 
 Salvando, os valores vão para a máquina **e** para o firmware do sensor.
 
-Parâmetros de fábrica: mínima `0,30 m/s`, máxima `5,20 m/s`, sem zona
-morta adicional e expoente `γ 2,20`. Esses valores coincidem com o
-firmware atual; para cada montagem, prefira o assistente acima.
+### A curva tem três âncoras, e não um expoente
+
+A nota sai de `scripts/score_curve.gd`, por três pontos que valem sempre:
+
+| Âncora | O que é | Paga |
+| --- | --- | --- |
+| **Velocidade mínima** | abaixo disso não é soco | `0000` |
+| **Soco de referência** | o golpe do cliente médio | **`5000`, sempre** |
+| **Velocidade máxima** | o teto da máquina | `9999` |
+
+O **contraste** é o segundo ajuste e é ortogonal ao primeiro: ele decide
+quanto a nota se espalha *entre* as âncoras e não mexe em nenhuma delas.
+Dá para mexer nele com o salão cheio sem medo — um soco médio continua
+pagando 5000.
+
+Quem regula a **dificuldade** é o soco de referência: exigir mais
+velocidade para pagar meio placar é, literalmente, a máquina ficar mais
+difícil, e isso se explica ao dono da máquina sem falar em expoente.
+
+A versão anterior usava uma potência única, `9999 × x^2,20`. Uma potência
+acima de 1 esmaga o meio da escala — que é onde está quase todo mundo. Um
+soco a 35 % da faixa calibrada, aceito pela placa, pagava **974 pontos**;
+com as âncoras, paga cerca de **2700**. "Mil" lê como máquina que não
+registrou, e era essa a reclamação.
+
+Parâmetros de fábrica: mínima `0,30 m/s`, máxima `5,20 m/s`, referência em
+55 % da faixa e contraste `1,15`. Para cada montagem, prefira o
+assistente acima.
+
+### Nunca regule o pulso mínimo à mão
+
+Ele não tem mais `−` e `+`, e isso é proposital. A palheta atravessa a
+fenda, então **quanto mais forte o soco, mais curto o pulso**: exigir um
+pulso mínimo maior não deixa a máquina mais sensível, deixa-a cega para
+os socos rápidos. Com palheta de 20 mm, um pulso mínimo de 5 ms manda a
+placa recusar tudo acima de 4 m/s — em silêncio.
+
+Hoje ele sai da largura da palheta e do teto calibrado, pela mesma regra
+que o firmware já aplica sozinho. Na Central aparece como leitura, com a
+janela que a montagem enxerga escrita ao lado — se a régua de pontuação
+não couber dentro dela, a linha fica vermelha.
 
 ## Teste sem Arduino
 

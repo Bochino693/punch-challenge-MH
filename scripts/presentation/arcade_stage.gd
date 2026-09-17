@@ -104,7 +104,33 @@ static var enfeite := 1.0
 static func _quantos(cheio: int) -> int:
 	return maxi(1, int(round(float(cheio) * enfeite)))
 
+## O CENÁRIO EM DUAS CAMADAS, E POR QUE ISSO IMPORTA NUM PC FRACO.
+##
+## Isto aqui era UMA função, chamada de um `_draw` que rodava sessenta
+## vezes por segundo, em TODA tela do jogo. E a maior parte do que ela
+## desenha não se mexe: o chão, os quatro planos vermelhos, as duas
+## barras de néon e as duas linhas douradas do horizonte são os mesmos
+## pixels, quadro após quadro, do início do expediente até o fim.
+##
+## Repintar um retângulo de tela cheia mais quatro polígonos grandes mais
+## oito barras de 1270 px de altura é trabalho de verdade — em 1080×1920
+## é da ordem de milhões de pixels por quadro, e este é o FUNDO: ele paga
+## essa conta por baixo de tudo o que o jogo desenha em cima. Num PC
+## folgado sobra tempo e ninguém nota. Num PC fraco é exatamente o tanto
+## que falta para o quadro fechar dentro do vsync — e quando ele não
+## fecha, o movimento vira o solavanco de 60/30 descrito em `Ritmo`.
+##
+## Separadas, a parte parada vai para um nó próprio que desenha UMA VEZ:
+## o Godot guarda a lista de desenho dele e a reaproveita sem executar
+## nada de novo. O que continua rodando todo quadro é só o que de fato se
+## move — as lâmpadas piscando e as fagulhas subindo —, que é uma fração
+## do custo.
 static func background(canvas: CanvasItem, time: float) -> void:
+	background_estatico(canvas)
+	background_animado(canvas, time)
+
+## A PARTE QUE NÃO SE MEXE. Desenhada uma vez por tamanho de tela.
+static func background_estatico(canvas: CanvasItem) -> void:
 	canvas.draw_rect(Rect2(0, 0, 1080, 1920), FLOOR)
 	# Grandes planos vermelhos, centro livre para a leitura a distância.
 	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 0), Vector2(1080, 0), Vector2(1080, 290), Vector2(0, 550)]), Color("9f0a20"))
@@ -131,6 +157,16 @@ static func background(canvas: CanvasItem, time: float) -> void:
 				Color(RED, 0.105), 10.0 + float(layer) * 15.0, true
 			)
 		canvas.draw_line(Vector2(x, 320), Vector2(x, 1590), RED, 4.0, true)
+	canvas.draw_line(Vector2(0, 552), Vector2(1080, 292), Color(GOLD, 0.55), 2.0, true)
+	canvas.draw_line(Vector2(0, 1652), Vector2(1080, 1402), Color(GOLD, 0.55), 2.0, true)
+
+## A PARTE QUE SE MEXE — e só ela. São vinte e duas fagulhas subindo e
+## vinte e quatro lâmpadas piscando: linhas finas e curtas, um custo que
+## cabe em qualquer aparelho, agora que não vêm mais acompanhadas de uma
+## tela inteira repintada por baixo.
+static func background_animado(canvas: CanvasItem, time: float) -> void:
+	for side in [0.0, 1.0]:
+		var x := lerpf(28.0, 1052.0, side)
 		for i in range(_quantos(12)):
 			var y := 455.0 + i * 86.0
 			var light := 0.25 + 0.75 * pow(0.5 + 0.5 * sin(time * 3.2 - i * 0.65), 3.0)
@@ -140,8 +176,6 @@ static func background(canvas: CanvasItem, time: float) -> void:
 		var y := fposmod(float(i) * 97.0 - time * speed, 1860.0)
 		var x := 65.0 + fposmod(float(i) * 157.0, 950.0)
 		canvas.draw_line(Vector2(x, y), Vector2(x + 3, y - 10), Color(GOLD, 0.12), 2.0, true)
-	canvas.draw_line(Vector2(0, 552), Vector2(1080, 292), Color(GOLD, 0.55), 2.0, true)
-	canvas.draw_line(Vector2(0, 1652), Vector2(1080, 1402), Color(GOLD, 0.55), 2.0, true)
 
 static func emblem(canvas: CanvasItem, center: Vector2, size: float, alpha := 1.0) -> void:
 	canvas.draw_texture_rect(EMBLEM, Rect2(center - Vector2.ONE * size * 0.5, Vector2.ONE * size), false, Color(1, 1, 1, alpha))
