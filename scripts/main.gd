@@ -777,11 +777,11 @@ func _configurar_enquadramento_universal() -> void:
 ## rodada: montar malha durante o jogo é engasgo garantido, e é
 ## justamente no primeiro soco que ele apareceria.
 ##
-## E NÃO HÁ MAIS ARQUIVO PARA FALTAR. Antes isto carregava um `.glb` que
-## um script em Python gerava, com todo o cuidado necessário para o caso
-## de a máquina chegar ao salão sem ele dentro. O lutador agora é código
-## (`LutadorNativo`): ele existe sempre que o jogo existe, e ajustar uma
-## proporção deixou de passar pelo Blender.
+## O LUTADOR É UMA FOLHA DE NOVE POSES DESENHADAS. Ela viaja no pacote
+## como qualquer outro recurso e é carregada uma vez aqui; o que a
+## transforma num lutador que se mexe é o movimento procedural de
+## `Lutador3D` — recuo, cambaleio, tombo, respiração — e não uma
+## animação gravada. Ver `docs/ARENA.md`.
 func _montar_arena() -> void:
 	if arena == null:
 		return
@@ -5136,15 +5136,15 @@ func _central_operacao() -> void:
 	_secao(Rect2(80, 920, 920, 225), "PERSONAGEM DA ARENA", Paleta.VERDE)
 	var avancado := arena != null and arena.modelo_avancado()
 	_texto(
-		"LUTADOR NATIVO • NOVE AÇÕES" if avancado else "LUTADOR INCOMPLETO",
+		"LUTADOR HD • NOVE POSES" if avancado else "FALTAM POSES NA FOLHA",
 		1000.0, 24, Paleta.VERDE if avancado else Paleta.AMBAR
 	)
 	_texto(
-		"Pronto para o salão" if avancado else "Alguma ação não subiu — veja o registro",
+		"Pronto para o salão" if avancado else "Confira assets/personagem/sprites",
 		1045.0, 17, Paleta.CREME
 	)
 	_texto(
-		"O corpo é construído pelo próprio jogo: não há arquivo de modelo para faltar.",
+		"Nove ilustrações e o movimento por cima delas — sem modelo 3D para faltar.",
 		1086.0, 14, Paleta.TINTA_FRACA
 	)
 

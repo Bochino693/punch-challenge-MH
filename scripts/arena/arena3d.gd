@@ -307,6 +307,29 @@ func _malha_silhueta_torcida() -> ArrayMesh:
 ## Partículas 3D ficam dentro do quadro da arena e usam poucos emissores.
 ## A resolução visual vem do material aditivo e da variação de escala, não de
 ## centenas de nós. Em qualidade baixa a quantidade cai automaticamente.
+## UMA FAÍSCA SUAVE, DESENHADA NA HORA.
+##
+## As partículas eram QUADS SEM TEXTURA: um retângulo de cor chapada com
+## quatro quinas vivas. Enquanto a câmera estava a 2,7 m e cada faísca
+## tinha oito pixels, ninguém via; com o enquadramento mais perto que a
+## ilustração pediu, elas apareceram como tijolos amarelos flutuando na
+## frente do lutador.
+##
+## Uma textura com queda suave nas bordas resolve, e ela não precisa vir
+## de arquivo nenhum: são 32 × 64 pixels calculados no arranque, uma vez.
+## O perfil é uma elipse com o brilho caindo ao quadrado do centro para
+## fora — que é o desenho de uma faísca vista de longe.
+static func _textura_de_faisca(largura: int, altura: int, dureza: float) -> ImageTexture:
+	var img := Image.create_empty(largura, altura, false, Image.FORMAT_RGBA8)
+	for y in range(altura):
+		for x in range(largura):
+			var dx := (float(x) + 0.5) / float(largura) * 2.0 - 1.0
+			var dy := (float(y) + 0.5) / float(altura) * 2.0 - 1.0
+			var d := sqrt(dx * dx + dy * dy)
+			var a := pow(clampf(1.0 - d, 0.0, 1.0), dureza)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	return ImageTexture.create_from_image(img)
+
 func _montar_particulas_de_impacto() -> void:
 	var brilho := StandardMaterial3D.new()
 	brilho.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -314,8 +337,9 @@ func _montar_particulas_de_impacto() -> void:
 	brilho.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	brilho.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	brilho.albedo_color = Color("ffdc8a")
+	brilho.albedo_texture = _textura_de_faisca(24, 64, 1.7)
 	var estrela := QuadMesh.new()
-	estrela.size = Vector2(0.075, 0.20)
+	estrela.size = Vector2(0.055, 0.16)
 	estrela.material = brilho
 	var processo := ParticleProcessMaterial.new()
 	processo.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -325,8 +349,8 @@ func _montar_particulas_de_impacto() -> void:
 	processo.initial_velocity_min = 2.8
 	processo.initial_velocity_max = 7.2
 	processo.gravity = Vector3(0.0, -5.5, 0.0)
-	processo.scale_min = 0.45
-	processo.scale_max = 1.30
+	processo.scale_min = 0.40
+	processo.scale_max = 1.05
 	processo.color = Color("fff0bd")
 	_impacto_particulas = GPUParticles3D.new()
 	_impacto_particulas.name = "ParticulasImpacto"
@@ -345,8 +369,11 @@ func _montar_particulas_de_impacto() -> void:
 	po_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	po_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	po_mat.albedo_color = Color(0.45, 0.52, 0.68, 0.32)
+	# A poeira da lona leva a mesma textura da faísca, mais macia: sem
+	# ela, uma nuvem de pó era um punhado de retângulos escuros.
+	po_mat.albedo_texture = _textura_de_faisca(48, 32, 2.6)
 	var disco := QuadMesh.new()
-	disco.size = Vector2(0.32, 0.18)
+	disco.size = Vector2(0.30, 0.17)
 	disco.material = po_mat
 	var po_processo := ParticleProcessMaterial.new()
 	po_processo.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
@@ -371,7 +398,7 @@ func _montar_particulas_de_impacto() -> void:
 	_mundo.add_child(_poeira_particulas)
 
 # ------------------------------------------------------------- o lutador
-## PÕE O LUTADOR NA LONA — CONSTRUÍDO AQUI, E NÃO CARREGADO DE UM ARQUIVO.
+## PÕE O LUTADOR NA LONA.
 ##
 ## Antes isto recebia um `PackedScene` vindo de `lutador.glb`, que por sua
 ## vez era gerado por um script em Python. Três coisas melhoraram ao
@@ -382,95 +409,25 @@ func _montar_particulas_de_impacto() -> void:
 ## Não há mais o caso "o arquivo não estava lá": o lutador existe sempre
 ## que o jogo existe.
 func instalar() -> bool:
-	var corpo := LutadorNativo.montar()
 	lutador = Lutador3D.new()
 	lutador.name = "Lutador"
 	_mundo.add_child(lutador)
-	lutador.montar(corpo)
-	_pintar_de_desenho(corpo)
+	lutador.montar()
 	return true
 
-# -------------------------------------------------------- o traço
-const TOON := preload("res://shaders/lutador_toon.gdshader")
-const CONTORNO := preload("res://shaders/lutador_contorno.gdshader")
-
-## Os materiais em uso, para o clarão do soco poder acendê-los.
-var _peles: Array[ShaderMaterial] = []
-
-## O LUTADOR VIRA DESENHO — sem trocar o modelo.
+## O LUTADOR NÃO É MAIS PINTADO AQUI, e o bloco que fazia isso — cento e
+## poucas linhas de sombreador de desenho, contorno por casca invertida e
+## cor por vértice — saiu inteiro junto com o corpo procedural.
 ##
-## O GLB chega com material comum: luz contínua e brilho especular. Num
-## corpo feito de formas redondas isso põe uma bolota clara em cima de
-## cada volume, e dezenas de bolotas claras em superfície lisa é a
-## aparência exata de brinquedo de plástico. Era essa a queixa.
+## Ele existia para transformar um modelo de plástico em algo que
+## parecesse desenhado. Com uma ILUSTRAÇÃO no lugar do modelo, o desenho
+## já vem desenhado: sombra, contorno, brilho do couro e a luz ciano e
+## magenta na borda estão pintados na arte. Continuar sombreando por cima
+## seria iluminar duas vezes.
 ##
-## O conserto não é modelar outro boneco: é PINTAR este. Cada superfície
-## do GLB troca o material por um de bandas (`lutador_toon`), levando
-## consigo a COR que já tinha — a paleta do personagem é a mesma, o que
-## muda é como a luz cai nela. E cada material ganha uma segunda passada
-## que desenha o contorno (`lutador_contorno`).
-##
-## Trocar a pintura e não a malha tem uma vantagem que vale dizer: quem
-## operar a máquina continua podendo substituir `lutador.glb` por outro
-## boneco, e o novo nasce desenhado do mesmo jeito, sem precisar de
-## ninguém preparando material.
-func _pintar_de_desenho(corpo: Node3D) -> void:
-	_peles.clear()
-	for malha in _malhas(corpo):
-		var geometria := malha.mesh
-		if geometria == null:
-			continue
-		for s in range(geometria.get_surface_count()):
-			# A COR VEM DO MATERIAL ORIGINAL. Sem isto o boneco inteiro
-			# sairia de uma cor só — perderíamos a luva vermelha, o
-			# calção preto e a pele, que são o personagem.
-			var cor := Color(0.9, 0.62, 0.42)
-			var antigo := malha.get_active_material(s)
-			if antigo is BaseMaterial3D:
-				cor = (antigo as BaseMaterial3D).albedo_color
-			# O CORPO NATIVO NÃO CARREGA MATERIAL NENHUM: cada peça declara a
-			# sua cor num metadado e a pintura acontece só aqui. É uma malha
-			# crua a menos por peça para a TV Box guardar, e é o que deixa a
-			# paleta do personagem numa página só (`LutadorNativo`).
-			if malha.has_meta("cor"):
-				cor = malha.get_meta("cor")
-			# As peças que o próprio controlador criou (a boca) não vieram
-			# do GLB e não têm material de origem: elas dizem a sua cor.
-			if lutador != null:
-				var declarada = lutador.cor_da_peca(malha)
-				if declarada != null:
-					cor = declarada
-			var tinta := ShaderMaterial.new()
-			tinta.shader = TOON
-			tinta.set_shader_parameter("cor_base", cor)
-			var traco := ShaderMaterial.new()
-			traco.shader = CONTORNO
-			# O CONTORNO ACOMPANHA A COR DA PEÇA, bem escurecido. Um preto
-			# só, igual para tudo, achata a figura; um traço que puxa para
-			# a cor do que está contornando é o que ilustrador faz.
-			traco.set_shader_parameter("cor", malha.get_meta("cor_traco", cor.darkened(0.86)))
-			# O CONTORNO É PARA A SILHUETA, NÃO PARA O DETALHE.
-			#
-			# A casca invertida empurra cada vértice 1,6 cm para fora. Numa
-			# peça de 2 cm — a boca, o lábio — isso é a peça inteira: a
-			# casca fica maior que o original, aparece por fora dele e o
-			# rosto ganha riscos pretos soltos em volta. Peça pequena
-			# dispensa contorno; ela já está contornada pela sombra da
-			# cara em volta.
-			var caixa_da_peca := geometria.get_aabb().size
-			var menor := minf(caixa_da_peca.x, minf(caixa_da_peca.y, caixa_da_peca.z))
-			if menor > 0.06:
-				tinta.next_pass = traco
-			malha.set_surface_override_material(s, tinta)
-			_peles.append(tinta)
+## O que a arena ainda faz pelo lutador é o que só ela pode fazer: o
+## clarão do soco (ver `_luzes`), o tremor, a câmera e as partículas.
 
-func _malhas(no: Node) -> Array[MeshInstance3D]:
-	var achadas: Array[MeshInstance3D] = []
-	if no is MeshInstance3D:
-		achadas.append(no as MeshInstance3D)
-	for filho in no.get_children():
-		achadas.append_array(_malhas(filho))
-	return achadas
 
 func modelo_avancado() -> bool:
 	return lutador != null and lutador.completo()
@@ -584,49 +541,52 @@ func _camera() -> void:
 	# de uma janela de 640 px é jogar fora o trabalho: a essa distância um
 	# músculo tem três pixels. Em 2,30 m a figura ocupa o quadro, e é aí
 	# que a diferença entre um desenho chapado e um corpo aparece.
-	var pos := Vector3(passeio, 1.30 + sin(_relogio * 0.21) * 0.05, 2.30 - _empurrao * 0.24)
-	var mira := Vector3(0.0, 1.14 + _empurrao * 0.06, 0.0)
+	# O ENQUADRAMENTO FOI REFEITO PARA A ILUSTRAÇÃO.
+	#
+	# A 2,30 m e com 44° de abertura, a janela mostra 1,86 m de altura — e
+	# o quadro do desenho tem 2,09. O lutador estourava por cima e por
+	# baixo, sem lona e sem cordas à vista. A 2,95 m a janela mostra
+	# 2,39 m: a figura ocupa três quartos da altura, sobra o tapete
+	# embaixo e a corda em cima, e é assim que um ringue se lê.
+	var pos := Vector3(passeio, 1.26 + sin(_relogio * 0.21) * 0.05, 2.95 - _empurrao * 0.30)
+	var mira := Vector3(0.0, 1.04 + _empurrao * 0.06, 0.0)
 	# QUANDO ELE CAI, A CÂMERA VAI JUNTO. Ficar parada na altura do peito
 	# depois do nocaute deixaria a moldura com um ringue vazio e o corpo
 	# fora de quadro — que foi exatamente o que aconteceu na primeira
 	# montagem. Subir e olhar para baixo é o que qualquer transmissão faz.
 	var caido := lutador.queda if lutador != null else 0.0
 	if caido > 0.001:
-		# O NOCAUTE É O MELHOR MOMENTO DO JOGO, E A CÂMERA ESTAVA PERDENDO.
+		# O NOCAUTE É O MELHOR MOMENTO DO JOGO, e a câmera desce para ver
+		# o corpo na lona de perto — mas AGORA ELA CONTINUA DE FRENTE.
 		#
-		# Ela subia para 2,24 m e mirava em z = −0,70, que é ATRÁS de onde
-		# o corpo cai: o lutador acabava pequeno e encostado no alto do
-		# quadro, com meia janela de lona vazia embaixo. Quem acabou de
-		# derrubar alguém quer ver o corpo no chão, grande e no meio.
+		# Antes ela dava a volta para o lado, e isso era o certo para um
+		# corpo modelado em três dimensões: de frente e de cima, um corpo
+		# caído de costas é visto pela sola dos pés e a imagem não diz
+		# "nocaute". Com uma ILUSTRAÇÃO, a regra se inverte: o desenho do
+		# nocaute já mostra o corpo deitado do ângulo certo, e é um plano
+		# — dar a volta nele o mostraria de perfil, ou seja, de canto,
+		# uma lâmina. A câmera desce, chega perto e fica de frente.
 		#
-		# Mais baixa, mais perto e mirando onde ele de fato está.
-		# E ELA VAI PARA O LADO, não para cima.
-		#
-		# De frente e de cima, um corpo caído de costas é visto pela sola
-		# dos pés: o tronco encurta na perspectiva, a cabeça fica longe e
-		# escondida atrás das luvas, e a imagem não diz "nocaute" — diz
-		# "alguma coisa no chão". De lado é como toda transmissão de boxe
-		# mostra um lutador na lona, e é a única posição em que o corpo
-		# inteiro aparece deitado, do pé à cabeça.
+		# E ELA AFASTA, NÃO APROXIMA. Um corpo em pé é alto e estreito; um
+		# corpo caído é BAIXO E LARGO, e o desenho do nocaute ocupa a
+		# largura inteira do quadro. Chegando perto — que é o instinto —
+		# a imagem corta os dois braços e sobra um torso gigante sem
+		# contexto. Afastando e descendo até quase a altura da lona, o
+		# corpo aparece inteiro e a câmera parece estar no tapete, que é
+		# onde toda transmissão de boxe põe a dela.
 		var t := ease(caido, 0.5)
-		# O corpo passa a ocupar de (0, 0,1, 0) nos pés a (0, 0,34, −1,6)
-		# na cabeça. A câmera olha o meio disso, de três quartos: numa
-		# janela em pé, um corpo deitado na diagonal cabe; atravessado,
-		# não cabe.
-		# Medido com o corpo já no chão: ele ocupa de (−0,18; −0,03; −1,66)
-		# a (0,73; 0,45; −0,10), com o centro em (0,28; 0,21; −0,88). A
-		# mira é esse centro, e não o meio do ringue — mirar no ringue era
-		# o que deixava o corpo fora do quadro.
-		pos = pos.lerp(Vector3(1.38, 1.74, 1.92), t)
-		mira = mira.lerp(Vector3(-0.30, 0.34, -0.66), t)
+		pos = pos.lerp(Vector3(0.0, 0.68, 3.16), t)
+		mira = mira.lerp(Vector3(0.0, 0.60, 0.0), t)
 	camera.position = pos + sacode
 	camera.look_at(mira, Vector3.UP)
 
 func _luzes() -> void:
-	# O clarão também entra na emissão do material para continuar nítido
-	# quando a qualidade dinâmica reduzir a resolução durante a pancada.
-	for tinta in _peles:
-		tinta.set_shader_parameter("clarao", _clarao)
+	# O CLARÃO TAMBÉM ACENDE A ILUSTRAÇÃO, e não só as luzes da arena.
+	# Sem isso o lutador ficava calmo, na sua cor de sempre, enquanto tudo
+	# em volta dele explodia — e o olho nota essa discordância antes de
+	# saber explicá-la.
+	if lutador != null:
+		lutador.clarao(_clarao)
 	# O golpe ACENDE a arena por um instante, pelas luzes de contorno. Um
 	# clarão branco por cima lavaria a imagem; puxar o contorno mantém as
 	# cores e ainda assim diz "explodiu".

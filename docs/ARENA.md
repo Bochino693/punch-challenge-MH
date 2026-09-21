@@ -44,106 +44,104 @@ chega esticada) e os testes.
 
 | arquivo | o que faz |
 |---|---|
-| `scripts/arena/figura.gd` | as formas torneadas, e a fusão das peças paradas |
-| `scripts/arena/lutador_nativo.gd` | monta o corpo: proporções, rosto, cores |
-| `scripts/arena/lutador_animacao.gd` | as nove ações, em tabelas de ângulos |
+| `assets/personagem/sprites/` | a folha de nove poses e o `SpriteFrames` |
+| `scripts/arena/lutador.gd` | as poses, o movimento por cima delas e as reações |
 | `scripts/arena/arena3d.gd` | o mundo 3D dentro do `SubViewport` |
-| `scripts/arena/lutador.gd` | conduz o tocador: reação, dano, queda, volta |
 | `scripts/arena/quadro.gd` | a moldura e as colunas de dano, em 2D |
 | `scripts/arena/frases.gd` | o que a máquina grita a cada nível |
 | `scripts/ranking_celebration.gd` | quatro cerimônias, conforme a colocação |
 | `tests/test_arena.gd` | o que não pode voltar a quebrar |
 
-## Como o corpo é feito
+## O lutador é desenhado, e o movimento é código
 
-Cada membro é uma sequência de **anéis** de raios diferentes, empilhados
-ao longo de um eixo e costurados — um torno. A anatomia inteira vira uma
-tabela de raios, que é uma coisa que dá para ajustar e comparar, ao
-contrário de vértices soltos: um bíceps é um raio maior no meio do
-caminho, um antebraço de boxeador é 0,059 m no cotovelo e 0,036 m no
-punho.
+O adversário são **nove ilustrações** numa folha 3×3
+(`assets/personagem/sprites/lutador_folha_3x3.png`, 410 × 426 px por
+pose), montadas num `AnimatedSprite3D` **dentro** da arena 3D — e não
+numa camada 2D por cima dela. A diferença importa: assim o lutador
+continua no ringue, com a perspectiva real, a câmera que recua no
+impacto, o tremor, as partículas, a luz ciano e magenta e o
+enquadramento do nocaute. Nada disso precisou ser reescrito.
 
-A normal de cada vértice sai da **inclinação do perfil** naquele ponto,
-calculada analiticamente e não pela média dos triângulos vizinhos. É o
-que dá superfície contínua de verdade, sem costura e sem faceta — e é a
-diferença entre isto e a versão de caixas empilhadas, que nenhuma
-iluminação tirava do aspecto de Minecraft.
+### Por que o corpo procedural saiu
 
-As medidas que definem o personagem:
+Ele era construído em GDScript: anéis torneados, músculo modelado,
+sombreador de desenho com brilho por material e contorno por casca
+invertida. Tecnicamente funcionava e custava onze chamadas de desenho.
+Visualmente nunca chegou onde precisava — a queixa final foi "grosso,
+cabelo mal definido, sem profundidade, o antebraço parece colado ao
+tórax", e as quatro estavam certas. **Geometria feita de elipsoides
+somados tem um teto de qualidade, e esse teto fica bem abaixo de uma
+ilustração.** Quem mantém isto depois de mim: não tente atravessar esse
+teto outra vez.
 
-| medida | valor |
+### As nove poses, e o que cada uma faz
+
+| pose | papel no jogo |
 |---|---|
-| altura total | 1,91 m (com a crista do cabelo) |
-| ombro a ombro | 0,64 m |
-| cintura | 0,20 m |
-| cabeça | 0,22 m — **8,7 cabeças de altura** |
-| luva | 0,068 m de raio, contra um punho de 0,046 m |
+| `guarda`, `idle` | alternam na respiração e na guarda |
+| `preparado` | o agachamento, segundo quadro da guarda |
+| `jab`, `direto` | o **desdém**: ele devolve dois socos no ar |
+| `impacto_corpo` | golpe leve e médio |
+| `impacto_forte` | golpe pesado e cambaleio |
+| `nocaute` | na lona |
+| `recuperacao` | levantando |
 
-Duas razões, e as duas viraram teste em `tests/test_arena.gd`:
+Nove papéis e nove desenhos, mas a correspondência **não é um para um**,
+e é de propósito: `hit_light` e `hit_medium` partilham a mesma
+ilustração porque a diferença entre um e outro não está no desenho, está
+no quanto o corpo recua e em quanto tempo volta.
 
-**O V sai de ombro sobre cintura.** Uma versão tinha 0,50 contra 0,38 —
-um e pouco para um é a proporção de um barril, e foi o que manteve a
-queixa de "parece um gordinho" mesmo depois de trocar a iluminação.
+### O movimento é tudo o que a folha não tem
 
-**E a altura sai de quantas cabeças.** O boneco gigante de Olinda é uma
-cabeça enorme sobre um corpo pequeno, e foi exatamente essa a queixa
-seguinte. Duas versões caíram em 6,5 e 7,4 cabeças, que é proporção de
-desenho infantil; herói de anime adulto tem oito ou mais. A proporção é
-a primeira coisa que o olho lê — antes do rosto, antes da pose —, e por
-isso ela é teste e não gosto.
+Cada pose é UM desenho parado. O que transforma nove desenhos num
+lutador é o movimento procedural de `scripts/arena/lutador.gd`:
 
-## O músculo é geometria, e a definição é luz
+* a **respiração**, um balanço de um centímetro e meio que nunca para —
+  sem ela o desenho denuncia que é um desenho no primeiro segundo;
+* o **recuo**, que anda para trás, tomba e desliza para o lado conforme
+  a tabela `RECUO`, e volta com uma curva que sai depressa e assenta
+  devagar, que é como um corpo que levou um soco se recompõe;
+* o **cambaleio**, que balança de lado enquanto volta — é o que separa
+  "levou um soco" de "perdeu a base";
+* o **tombo**, que desce o corpo até a lona com um repique curtíssimo no
+  fim, e é a única coisa que não volta sozinha: ela espera o `get_up`;
+* o **clarão** do impacto e o tom que puxa para o vermelho conforme o
+  dano acumula.
 
-Um tronco torneado é um volume liso: a luz cai nele de um jeito só e
-nada quebra a passagem da luz para a sombra. O que faz um peito ler como
-peito é a SEQUÊNCIA de volumes — peitoral, serrátil, oblíquo, dorsal —
-cada um com a sua divisa, cada um pegando a luz num ângulo diferente.
+É a técnica de um jogo de luta 2D clássico — poucos quadros, muita
+física por cima —, e é ela que faz um soco leve e um soco que derruba
+parecerem coisas diferentes mesmo quando a ilustração de fundo é a
+mesma. A escada entre as reações (`DURACAO` e `RECUO`) é conferida por
+teste: uma reação mais forte tem de durar mais e empurrar mais.
 
-O corpo tem peitoral, os seis do abdome com a linha alba entre eles,
-oblíquo, serrátil, dorsal, trapézio, as três cabeças do deltoide,
-bíceps, tríceps, braquiorradial, o vasto e o reto da coxa, e as duas
-cabeças da panturrilha. Trinta e dois mil triângulos — o dobro da
-versão lisa — e **as mesmas onze chamadas de desenho**, porque tudo isso
-é costurado dentro da junta que o carrega.
+### Duas armadilhas que o render ensinou
 
-Três coisas aprendidas apanhando do render, todas contra-intuitivas:
+**O tamanho vem do `pixel_size`.** A folha não sabe de metros: são 426
+pixels de altura, e é `pixel_size` que decide se aquilo vira um lutador
+de 1,80 m ou um gigante que estoura o quadro. Estourou na primeira
+montagem, e é um erro que teste nenhum pega olhando só para o código —
+por isso `tests/test_arena.gd` confere a escala em metros.
 
-* **relevo tem de ser inchaço, não peça pousada.** As primeiras versões
-  do arco da órbita e da maçã do rosto ficaram POR FORA da silhueta da
-  cabeça e apareceram como salsichas rosadas. O que desenha a forma é a
-  divisa das bandas passando por cima do relevo, e para isso basta meio
-  milímetro de saliência;
-* **peitoral redondo lê como seio.** Ele precisa ser uma placa rasa
-  (0,34 de achatamento, não 0,46), com a massa em cima e inclinada na
-  direção da fibra — do esterno para o ombro, subindo;
-* **luz frontal apaga a forma.** Era a maior causa do "parece 2D", mais
-  do que o número de bandas: luz de frente ilumina tudo o que a câmera
-  vê com a mesma intensidade e o que sobra é uma silhueta preenchida.
+**No nocaute a câmera AFASTA, não aproxima.** Um corpo em pé é alto e
+estreito; um corpo caído é baixo e largo, e o desenho do nocaute ocupa a
+largura inteira do quadro. Chegando perto — que é o instinto, e o que a
+versão 3D fazia certo — a imagem corta os dois braços e sobra um torso
+gigante sem contexto. E ela continua **de frente**: o desenho já mostra
+o corpo do ângulo certo, e dar a volta nele mostraria um plano de
+perfil, ou seja, uma lâmina.
 
-O sombreador (`shaders/lutador_toon.gdshader`) fecha a conta: quatro
-degraus de luz, sombra colorida e não cinza, um rebatedor frio do lado
-oposto para a sombra não morrer, brilho especular com o tamanho de um
-ponto (`dureza 140` — com 52 ele saía como mancha branca mole, tinta
-respingada no corpo) e o brilho de cada material viajando no VÉRTICE,
-porque depois da fusão não existe mais peça onde guardar um material.
+### O custo
 
-## Onze chamadas de desenho, e não sessenta e três
+Uma chamada de desenho, contra as onze do corpo procedural. Medido com
+o jogo rodando, o quadro fica em 6,92 ms de mediana e 7,14 no pior caso
+— idêntico a antes da troca.
 
-O corpo tem sessenta e três peças, mas só **onze** se mexem sozinhas —
-as que as animações citam. Todo o resto (olhos, cabelo, luvas, botas,
-faixas do calção) é costurado dentro da junta que o carrega, na
-montagem, com a cor viajando **no vértice**.
+### Trocar a arte
 
-Isso importa porque o gargalo de uma TV Box não é triângulo, é chamada
-de desenho: dezessete mil triângulos qualquer GPU deste século desenha
-sem suar, mas sessenta e três chamadas — cento e vinte e seis com a
-passada do contorno — é trabalho de processador, e aparece como engasgo,
-não como queda suave de quadros.
+Substitua a folha e o `lutador_sprite_frames.tres`, mantendo os nove
+nomes de pose da tabela acima. `Lutador3D.PAPEIS` é o mapa entre papel
+do jogo e desenho; `tests/test_arena.gd` falha se faltar qualquer um.
 
-A passada do contorno é uma casca invertida, e ela só vale para a
-silhueta: cada vértice leva, na primeira coordenada de textura, se a peça
-dele entra na casca. Sem isso a casca do olho ficava maior que o olho,
-escapava por fora da pele e riscava a cara de preto.
 
 ## Premiação e torcida
 

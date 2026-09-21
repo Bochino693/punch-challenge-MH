@@ -70,22 +70,35 @@ func _test_a_leitura_da_porta_nao_segura_o_quadro() -> void:
 func _test_a_enumeracao_nao_roda_no_laco_do_jogo() -> void:
 	var fonte := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_ok("_listar_no_fundo" in fonte, "a enumeração precisa acontecer numa thread")
-	var i := fonte.find("func _recolher_a_lista")
-	_ok(i >= 0, "precisa existir quem recolha o que a thread achou")
-	if i >= 0:
-		var corpo := fonte.substr(i, 420)
-		_ok("is_alive()" in corpo,
+	var recolhe := _corpo_da_funcao(fonte, "_recolher_a_lista")
+	_ok(not recolhe.is_empty(), "precisa existir quem recolha o que a thread achou")
+	if not recolhe.is_empty():
+		_ok("is_alive()" in recolhe,
 			"recolher tem de desistir quando a thread ainda está correndo")
+
+## O CORPO DE UMA FUNÇÃO INTEIRO, e não os primeiros N caracteres.
+##
+## As duas conferências acima liam uma janela de tamanho fixo a partir do
+## nome da função, e as duas quebraram pelo mesmo motivo: alguém
+## documentou melhor o que a função faz, o comentário empurrou o código
+## para fora da janela e o teste passou a procurar uma linha que ele
+## mesmo tinha cortado. Falhava sem que nada estivesse errado — o pior
+## tipo de teste, porque ensina a ignorá-lo.
+func _corpo_da_funcao(fonte: String, nome: String) -> String:
+	var i := fonte.find("func %s" % nome)
+	if i < 0:
+		return ""
+	var fim := fonte.find("\nfunc ", i + 1)
+	return fonte.substr(i, (fim - i) if fim > i else -1)
 
 ## A extensão GdSerial é consultada pela thread principal em `poll_events`.
 ## Entregar o mesmo objeto nativo à thread de enumeração cria uma corrida que,
 ## no Windows sem Arduino conectado, pode abortar o processo inteiro.
 func _test_a_extensao_nativa_nao_e_enumerada_em_thread() -> void:
 	var fonte := FileAccess.get_file_as_string("res://scripts/main.gd")
-	var i := fonte.find("func _pedir_a_lista")
-	_ok(i >= 0, "precisa existir quem agenda a enumeração das portas")
-	if i >= 0:
-		var corpo := fonte.substr(i, 1200)
+	var corpo := _corpo_da_funcao(fonte, "_pedir_a_lista")
+	_ok(not corpo.is_empty(), "precisa existir quem agenda a enumeração das portas")
+	if not corpo.is_empty():
 		_ok("SerialLink.CAMINHO_NATIVO" in corpo,
 			"a enumeração em thread precisa excluir a extensão nativa")
 		_ok(corpo.find("SerialLink.CAMINHO_NATIVO") < corpo.find("_thread_portas.start"),

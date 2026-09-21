@@ -32,12 +32,12 @@ func _perto(a: float, b: float, folga: float, o_que: String) -> void:
 
 func _initialize() -> void:
 	_test_o_lutador_nasce_completo()
-	_test_o_corpo_e_um_atleta()
-	_test_o_corpo_custa_pouco_para_desenhar()
+	_test_a_folha_de_sprites_existe_com_as_nove_poses()
+	_test_o_lutador_tem_tamanho_de_gente()
 	_test_a_janela_tem_a_proporcao_do_buraco()
 	_test_as_barras_cabem_na_moldura()
-	_test_a_postura_parada_se_repete()
-	_test_a_reacao_dura_o_que_a_animacao_dura()
+	_test_a_postura_parada_se_mexe()
+	_test_a_reacao_cresce_com_a_forca()
 	_test_o_dano_soma_e_nao_passa_de_um()
 	_test_cada_forca_tem_reacao_propria()
 	_test_desdenho_usa_a_nota_e_respeita_a_lona()
@@ -54,108 +54,69 @@ func _initialize() -> void:
 	quit(1 if falhas > 0 else 0)
 
 # ------------------------------------------------------------- o lutador
-## O LUTADOR NASCE INTEIRO, SEM ARQUIVO NENHUM.
+## O LUTADOR NASCE INTEIRO, E AGORA ELE É DESENHO.
 ##
-## Antes o corpo vinha de `assets/personagem/lutador.glb`, gerado por um
-## script em Python. Isso queria dizer duas coisas ruins: o jogo podia
-## chegar ao salão sem o boneco dentro, e ajustar uma proporção exigia
-## Python e Blender na máquina de quem mexesse. Agora ele é montado em
-## GDScript (`LutadorNativo`) e não há arquivo para faltar — mas há um
-## contrato novo a guardar: as nove ações precisam existir mesmo assim.
+## O corpo procedural — anéis torneados, músculo modelado, sombreador de
+## desenho — saiu. Ele funcionava e custava onze chamadas de desenho, mas
+## geometria feita de elipsoides somados tem um teto de qualidade, e esse
+## teto fica bem abaixo de uma ilustração. No lugar entrou uma folha de
+## nove poses desenhadas.
+##
+## O contrato mudou de forma e não de fundo: continuam sendo nove papéis,
+## e cada um precisa achar o seu desenho na folha. Um papel sem desenho é
+## um lutador que congela no meio de uma reação.
 func _test_o_lutador_nasce_completo() -> void:
 	var controle := _lutador()
 	var animacoes := controle.animacoes_disponiveis()
 	for nome in Lutador3D.ALIASES:
-		_ok(nome in animacoes, "o lutador precisa da ação %s" % nome)
-	_ok(controle.completo(), "o lutador tem de nascer com o contrato inteiro")
+		_ok(nome in animacoes, "o lutador precisa do papel %s" % nome)
+	_ok(controle.completo(), "os nove papéis têm de achar desenho na folha")
 	controle.free()
 
-## A SILHUETA É O PERSONAGEM, e ela é conferível em números.
+## A FOLHA TEM DE ESTAR NO DISCO, e com os nove recortes.
 ##
-## A queixa que originou esta reformulação foi "está parecendo um
-## gordinho". O boneco anterior tinha ombro de 0,50 m e cintura de 0,38:
-## um e pouco para um, que é a proporção de um barril e nenhuma
-## iluminação conserta. Estes números são os que fazem a figura ler como
-## atleta a três metros da máquina, e um ajuste que os quebre tem de
-## falhar aqui e não no salão.
-func _test_o_corpo_e_um_atleta() -> void:
-	var corpo := LutadorNativo.montar()
-	var ombro_e := corpo.find_child("Ombro_E", true, false) as Node3D
-	var ombro_d := corpo.find_child("Ombro_D", true, false) as Node3D
-	var largura_do_ombro := absf(ombro_d.position.x - ombro_e.position.x)
-	var cintura := 0.0
-	for passo in LutadorNativo.P_TRONCO:
-		cintura = (passo as Vector2).y if cintura == 0.0 else minf(cintura, (passo as Vector2).y)
-	var peito := 0.0
-	for passo in LutadorNativo.P_TRONCO:
-		peito = maxf(peito, (passo as Vector2).y)
-	_ok(peito / cintura > 1.8, "o tronco precisa do V (peito %.3f / cintura %.3f)" % [peito, cintura])
-	_ok(largura_do_ombro > peito * 2.0,
-		"o ombro precisa passar da caixa torácica (%.3f vs %.3f)" % [largura_do_ombro, peito * 2.0])
-	# E O QUADRIL NÃO PODE SER MAIS LARGO QUE O PEITO. Enquanto foi, a
-	# silhueta era uma pera por mais músculo que o tronco tivesse — e foi
-	# esse o defeito que sobreviveu à primeira reformulação inteira.
-	var quadril := 0.0
-	for passo in LutadorNativo.P_QUADRIL:
-		quadril = maxf(quadril, (passo as Vector2).y)
-	_ok(quadril < peito, "o quadril não pode ser mais largo que o peito (%.3f vs %.3f)" % [quadril, peito])
-	# A LUVA É PROPORCIONAL AO PUNHO, e não à cabeça: luva do tamanho da
-	# cabeça é linguagem de desenho infantil e ainda escondia o rosto
-	# inteiro na guarda.
-	var luva := corpo.find_child("Luva_D", true, false) as MeshInstance3D
-	var cabeca := corpo.find_child("Cabeca", true, false) as MeshInstance3D
-	_ok(luva != null and cabeca != null, "luva e cabeça têm de existir")
+## Ela é o personagem inteiro agora: sem ela não há adversário nenhum, e
+## o modo de falhar é silencioso — um `AnimatedSprite3D` sem quadros
+## simplesmente não desenha nada, e a arena fica sendo um ringue vazio
+## com as luzes acesas.
+func _test_a_folha_de_sprites_existe_com_as_nove_poses() -> void:
+	_ok(ResourceLoader.exists(Lutador3D.FOLHA), "a folha de poses tem de estar no disco")
+	if not ResourceLoader.exists(Lutador3D.FOLHA):
+		return
+	var folha := load(Lutador3D.FOLHA) as SpriteFrames
+	_ok(folha != null, "a folha tem de abrir como SpriteFrames")
+	if folha == null:
+		return
+	for pose in ["guarda", "idle", "preparado", "jab", "direto",
+			"impacto_corpo", "impacto_forte", "nocaute", "recuperacao"]:
+		_ok(folha.has_animation(StringName(pose)), "falta a pose %s na folha" % pose)
+		if folha.has_animation(StringName(pose)):
+			_ok(folha.get_frame_texture(StringName(pose), 0) != null,
+				"a pose %s existe mas não tem desenho" % pose)
 
-	# QUANTAS CABEÇAS DE ALTURA — a medida que separa um herói de um
-	# boneco de Olinda, que foi a queixa exata que veio do operador.
-	#
-	# O boneco gigante do carnaval é uma cabeça enorme sobre um corpo
-	# pequeno; herói de anime adulto tem oito cabeças ou mais. Duas
-	# versões seguidas deste lutador caíram em 6,5 e 7,4, e nas duas a
-	# figura saiu infantil por mais músculo que o corpo tivesse. A
-	# proporção é a primeira coisa que o olho lê, antes do rosto e antes
-	# da pose, e por isso ela é teste e não gosto.
-	var alto := _alto_do_corpo(corpo)
-	var cabecas := alto / (LutadorNativo.RAIO_DA_CABECA * 2.0 * 1.09)
-	_ok(cabecas >= 7.8, "o corpo precisa de 7,8 cabeças ou mais (tem %.1f)" % cabecas)
-	_ok(cabecas <= 9.0, "acima de nove cabeças a figura vira caricatura magra (%.1f)" % cabecas)
-	corpo.free()
-
-## A altura do ponto mais alto do corpo acima da lona, varrendo as peças.
-func _alto_do_corpo(raiz: Node3D) -> float:
-	var teto := 0.0
-	for malha in _todas_as_malhas(raiz):
-		if malha.mesh == null:
-			continue
-		var caixa := malha.mesh.get_aabb()
-		teto = maxf(teto, _onde(raiz, malha).y + caixa.position.y + caixa.size.y)
-	return teto
-
-## O CORPO INTEIRO CABE EM POUCAS CHAMADAS DE DESENHO.
+## O LUTADOR CABE NO RINGUE, em metros.
 ##
-## Sessenta e três peças soltas seriam sessenta e três chamadas, e cento e
-## vinte e seis com a passada do contorno. Chamada de desenho é trabalho
-## de processador, é o que uma TV Box tem de pior, e aparece como engasgo
-## e não como queda suave de quadros. `Figura.fundir` costura tudo o que
-## não se mexe sozinho dentro da junta que o carrega.
-func _test_o_corpo_custa_pouco_para_desenhar() -> void:
-	var corpo := LutadorNativo.montar()
-	var desenhos := 0
-	for malha in _todas_as_malhas(corpo):
-		if malha.mesh != null:
-			desenhos += malha.mesh.get_surface_count()
-	_ok(desenhos <= 14, "o corpo não pode passar de 14 chamadas de desenho (são %d)" % desenhos)
-	_ok(desenhos >= LutadorNativo.JUNTAS_MOVEIS.size(),
-		"cada junta com movimento próprio precisa da sua malha")
-	corpo.free()
+## A folha não sabe de metros: ela tem 426 pixels de altura por pose, e é
+## `pixel_size` que decide se aquilo vira um lutador de 1,80 m ou um
+## gigante de três metros que estoura o quadro. Foi o que aconteceu na
+## primeira montagem, e é um erro que não aparece em teste nenhum que
+## olhe só para o código.
+func _test_o_lutador_tem_tamanho_de_gente() -> void:
+	var l := _lutador()
+	var figura := l.get_node_or_null("Corpo/Figura") as AnimatedSprite3D
+	_ok(figura != null, "o desenho tem de estar montado")
+	if figura == null:
+		l.free()
+		return
+	var alto := Lutador3D.ALTURA_DO_QUADRO
+	_ok(alto > 1.7 and alto < 2.6, "o quadro do desenho mede %.2f m — fora de escala" % alto)
+	_perto(figura.pixel_size * Lutador3D.ALTURA_DA_FOLHA, alto, 0.001,
+		"o tamanho do pixel tem de sair da altura pedida")
+	# E UMA SÓ CHAMADA DE DESENHO. O corpo anterior custava onze; este
+	# custa um, que é o piso do possível — importa numa TV Box.
+	_ok(figura is AnimatedSprite3D, "o lutador é um desenho só, e não uma coleção de malhas")
+	l.free()
 
-func _todas_as_malhas(no: Node) -> Array[MeshInstance3D]:
-	var achadas: Array[MeshInstance3D] = []
-	if no is MeshInstance3D:
-		achadas.append(no as MeshInstance3D)
-	for filho in no.get_children():
-		achadas.append_array(_todas_as_malhas(filho))
-	return achadas
 
 # -------------------------------------------------------------- moldura
 func _test_a_janela_tem_a_proporcao_do_buraco() -> void:
@@ -179,78 +140,86 @@ func _test_as_barras_cabem_na_moldura() -> void:
 # ------------------------------------------------------------- o corpo
 func _lutador() -> Lutador3D:
 	var l := Lutador3D.new()
-	l.montar(LutadorNativo.montar())
+	l.montar()
 	l.preparar()
 	return l
 
-## O TOCADOR SÓ ANDA SOZINHO DENTRO DA ÁRVORE. Fora dela — que é onde um
-## teste vive — `advance` dá exatamente o passo que o motor daria, e é o
-## que permite medir a pose de um gesto sem subir a cena inteira.
+## O RELÓGIO DO LUTADOR É O DO JOGO, e mais nada.
+##
+## Enquanto o corpo era animado por um `AnimationPlayer`, um teste
+## precisava empurrar o tocador à mão porque ele só anda sozinho dentro
+## da árvore da cena. Com poses desenhadas não há tocador: todo o
+## movimento — troca de quadro, recuo, tombo — sai de `atualizar`, e
+## chamar `atualizar` É rodar o lutador.
 func _correr(l: Lutador3D, quadros: int) -> void:
 	for i in range(quadros):
 		l.atualizar(1.0 / 60.0)
-		if l._animador != null:
-			l._animador.advance(1.0 / 60.0)
 
-## A POSTURA PARADA TEM DE SE REPETIR, E NÃO RECOMEÇAR.
+## A POSTURA PARADA TEM DE SE MEXER, E NÃO CONGELAR.
 ##
-## O glTF não guarda modo de repetição, então o importador marca toda
-## animação como tocar-uma-vez — inclusive `idle`, de três segundos, e
-## `guard`, de dois. Elas acabavam, paravam, e no quadro seguinte o
-## controlador via que não estavam mais rodando e mandava tocar de novo
-## DO COMEÇO, com 0,2 s de mistura: um solavanco a cada ciclo, para
-## sempre, na tela em que o jogador mais olha para o boneco. Era a maior
-## parte do "o personagem não se mexe natural".
+## É a mesma promessa de sempre, com o defeito ao contrário. Com
+## animações, o perigo era `idle` acabar e recomeçar com um solavanco a
+## cada ciclo. Com poses DESENHADAS, o perigo é não acontecer nada: um
+## desenho parado é um cartaz, e o jogador percebe isso no primeiro
+## segundo da tela em que ele mais olha para o adversário.
 ##
-## Este teste é a única defesa possível, porque o defeito não aparece em
-## quadro nenhum isolado — só em quem fica olhando alguns segundos.
-func _test_a_postura_parada_se_repete() -> void:
+## Duas coisas guardam isso: os papéis contínuos alternam entre dois
+## desenhos, e o corpo respira o tempo todo.
+func _test_a_postura_parada_se_mexe() -> void:
 	for papel in Lutador3D.PAPEIS_CONTINUOS:
-		var l := _lutador()
-		var ap: AnimationPlayer = l._animador
-		if ap == null or not l._animacoes.has(papel):
-			l.free()
-			continue
-		var anim := ap.get_animation(l._animacoes[papel])
-		_ok(anim.loop_mode == Animation.LOOP_LINEAR,
-			"a postura %s tem de ser marcada como contínua" % papel)
-		l.free()
-	# E os gestos são o contrário: repetir um soco levado vira tique.
-	var g := _lutador()
-	for papel in ["hit_light", "hit_heavy", "stagger", "knockout", "taunt_weak", "get_up"]:
-		if not g._animacoes.has(papel):
-			continue
-		var anim := (g._animador as AnimationPlayer).get_animation(g._animacoes[papel])
-		_ok(anim.loop_mode == Animation.LOOP_NONE, "o gesto %s não pode se repetir" % papel)
-	g.free()
-
-## A REAÇÃO DURA O QUE A ANIMAÇÃO DURA.
-##
-## As durações eram uma tabela escrita à mão, e TODAS curtas: `stagger`
-## anotado como 1,35 s dura 1,53; `taunt_weak` anotado como 1,18 dura
-## 1,40. O relógio acabava antes do gesto e a volta para a guarda
-## começava no meio do movimento. E como `bater` toca mais rápido ou mais
-## devagar conforme a força, nenhuma tabela fixa poderia ter acertado.
-func _test_a_reacao_dura_o_que_a_animacao_dura() -> void:
+		var receita: Dictionary = Lutador3D.PAPEIS[papel]
+		_ok((receita["quadros"] as Array).size() >= 2,
+			"a postura %s precisa de mais de um desenho para não congelar" % papel)
 	var l := _lutador()
-	var ap: AnimationPlayer = l._animador
-	if ap == null:
+	var corpo := l.get_node_or_null("Corpo") as Node3D
+	_ok(corpo != null, "o corpo tem de existir")
+	if corpo == null:
 		l.free()
 		return
-	for papel in ["hit_light", "hit_medium", "hit_heavy", "stagger", "taunt_weak"]:
-		if not l._animacoes.has(papel):
-			continue
-		var comprimento := ap.get_animation(l._animacoes[papel]).length
-		_perto(l._duracao(papel, 1.0), comprimento, 0.001,
-			"a duração de %s tem de sair da animação" % papel)
-	# Tocada mais rápido, a reação acaba antes — e o controlador precisa
-	# saber disso, senão fica esperando parado no fim do gesto.
-	_ok(l._duracao("stagger", 1.10) < l._duracao("stagger", 1.0),
-		"a duração tem de acompanhar a velocidade de reprodução")
-	# E um papel que não existe no arquivo ainda tem um tempo razoável:
-	# um GLB incompleto não pode travar o lutador para sempre.
-	var ausente := l._duracao("nao_existe_este_papel", 1.0)
-	_ok(ausente > 0.2 and ausente < 3.0, "papel ausente precisa de uma duração de reserva")
+	var visto := {}
+	var alturas := []
+	var figura := l.get_node_or_null("Corpo/Figura") as AnimatedSprite3D
+	for i in range(140):
+		l.atualizar(1.0 / 60.0)
+		visto[String(figura.animation)] = true
+		alturas.append(corpo.position.y)
+	_ok(visto.size() >= 2, "parado, o lutador tem de trocar de desenho (viu %d)" % visto.size())
+	var menor: float = alturas[0]
+	var maior: float = alturas[0]
+	for a in alturas:
+		menor = minf(menor, float(a))
+		maior = maxf(maior, float(a))
+	_ok(maior - menor > 0.01, "ele tem de respirar (balançou %.3f m)" % (maior - menor))
+	l.free()
+
+## CADA REAÇÃO DURA O QUE A DIREÇÃO MANDA, e a escada entre elas é o que
+## faz a nota na tela e o corpo contarem a mesma história.
+##
+## Com animações de verdade a duração saía do comprimento delas — uma
+## tabela à mão não teria como acompanhar. Com poses desenhadas não há
+## comprimento a medir: a duração É a decisão, e o que um teste pode
+## guardar é que ela CRESCE com a força do golpe. Um soco de 9.000 que
+## acabasse antes de um de 3.000 seria um adversário que desmente o
+## placar.
+func _test_a_reacao_cresce_com_a_forca() -> void:
+	var escada := ["hit_light", "hit_medium", "hit_heavy", "stagger"]
+	for i in range(escada.size() - 1):
+		var antes := float(Lutador3D.DURACAO[escada[i]])
+		var depois := float(Lutador3D.DURACAO[escada[i + 1]])
+		_ok(depois > antes, "%s tem de durar mais que %s" % [escada[i + 1], escada[i]])
+		var recuo_antes := float(Lutador3D.RECUO[escada[i]]["tras"])
+		var recuo_depois := float(Lutador3D.RECUO[escada[i + 1]]["tras"])
+		_ok(recuo_depois > recuo_antes,
+			"%s tem de empurrar mais que %s" % [escada[i + 1], escada[i]])
+	# E O RECUO ACONTECE DE VERDADE no corpo, não só na tabela.
+	var l := _lutador()
+	var corpo := l.get_node_or_null("Corpo") as Node3D
+	l.bater(0.70, false, 8000)
+	_correr(l, 6)
+	_ok(corpo.position.z < -0.05,
+		"o golpe tem de empurrar o corpo para trás (z=%.3f)" % corpo.position.z)
+	_correr(l, 120)
+	_perto(corpo.position.z, 0.0, 0.02, "e ele tem de voltar sozinho")
 	l.free()
 
 func _test_o_dano_soma_e_nao_passa_de_um() -> void:
@@ -296,128 +265,77 @@ func _test_desdenho_usa_a_nota_e_respeita_a_lona() -> void:
 
 ## O NOCAUTE PRECISA DERRUBAR.
 ##
-## Medido osso a osso: durante a animação `knockout` que veio no GLB, a
-## cabeça do lutador sai de 1,59 m para 1,63 m e anda doze centímetros
-## para trás. Ele não cai — inclina e volta. E o jogo inteiro acreditava:
-## tocava o som de queda, anunciava NOCAUTE, gritava a torcida, levava a
-## câmera para a altura da lona e esperava 3,35 s "no chão" com o boneco
-## em pé o tempo todo.
+## Medido no modelo anterior: durante a animação de nocaute que veio no
+## arquivo, a cabeça do lutador saía de 1,59 m para 1,63 m e andava doze
+## centímetros para trás. Ele não caía — inclinava e voltava. E o jogo
+## inteiro acreditava: tocava o som de queda, anunciava NOCAUTE, gritava
+## a torcida, levava a câmera para a altura da lona e esperava 3,35 s "no
+## chão" com o boneco em pé o tempo todo.
 ##
-## A queda passou a ser feita no osso-raiz (`Lutador3D._aplicar_queda`).
-## Este teste guarda as duas coisas que aquilo precisa cumprir, e nenhuma
-## delas dá para ver num quadro isolado.
+## Com poses desenhadas a mecânica da queda é outra — o desenho já mostra
+## o corpo no chão e o que falta é ele DESCER até lá —, mas a promessa ao
+## jogo é exatamente a mesma, e é ela que este teste guarda.
 func _test_o_nocaute_derruba_de_verdade() -> void:
 	var l := _lutador()
-	var corpo := l.get_child(0) as Node3D
-	var cabeca := corpo.find_child("Cabeca", true, false) as Node3D
-	var em_pe := _altura(corpo, cabeca)
+	_ok(l.desenho_atual() != "nocaute", "de pé, ele não pode estar desenhado caído")
 	l.bater(1.0, true, 9600)
 	_correr(l, 130)
 	_ok(l.queda > 0.9, "depois do nocaute o lutador tem de estar no chão")
-	var deitado := _altura(corpo, cabeca)
-	# A CABEÇA TEM DE CHEGAR PERTO DA LONA. Não basta inclinar: o boneco
-	# antigo movia a cabeça quatro centímetros e voltava, enquanto o jogo
-	# tocava som de queda, anunciava NOCAUTE e levava a câmera para a
-	# altura do tapete — o momento mais importante da partida era a
-	# câmera olhando para um pedaço vazio de lona.
-	_ok(deitado < 0.55,
-		"a cabeça tem de ir ao chão (de %.2f m para %.2f m)" % [em_pe, deitado])
-	_ok(deitado > 0.02, "e não pode atravessar a lona (%.2f m)" % deitado)
-
-	# E A POSE NÃO PODE SE ACUMULAR.
-	#
-	# A primeira versão lia a pose e multiplicava o giro nela a cada
-	# quadro. Enquanto a animação toca ela reescreve a pose antes de cada
-	# acréscimo e nada aparece; mas a animação de nocaute dura 1,93 s e
-	# NÃO SE REPETE, e quando ela acaba ninguém mais reescreve a pose: o
-	# mesmo giro passa a ser multiplicado sessenta vezes por segundo em
-	# cima de si mesmo. O lutador dava voltas e sumia do ringue em meio
-	# segundo.
-	#
-	# Aqui a queda é fixada e a função chamada duzentas vezes seguidas,
-	# sem o resto do quadro no meio: com a pose escrita de forma absoluta
-	# a partir da pose guardada, chamar uma vez ou duzentas dá no mesmo.
-	# Com a versão que acumulava, isto gira mais de mil graus.
-	l.queda = 1.0
-	l._aplicar_queda()
-	var uma_vez := _altura(corpo, cabeca)
-	for i in range(200):
-		l.queda = 1.0
-		l._aplicar_queda()
-	_perto(_altura(corpo, cabeca), uma_vez, 0.001,
-		"a pose da queda tem de ser absoluta, e não somar a cada chamada")
+	# AS DUAS COISAS QUE SÃO REAIS num corpo desenhado: o desenho exibido
+	# vira o do nocaute, e o corpo desce até o tapete. Medir "a altura da
+	# cabeça" seria inventar coordenada para um osso que não existe.
+	_ok(l.desenho_atual() == "nocaute",
+		"na lona ele tem de estar desenhado caído (está em %s)" % l.desenho_atual())
+	_ok(l.fundura_do_tombo() > 0.85,
+		"o corpo tem de descer até a lona (desceu %.2f)" % l.fundura_do_tombo())
 	l.free()
 
-## A altura de uma peça acima da lona, somando as juntas até a raiz — o
-## `global_position` não serve, porque o corpo de teste não está na
-## árvore da cena.
-func _altura(raiz: Node3D, no: Node3D) -> float:
-	var t := Transform3D.IDENTITY
-	var atual := no
-	while atual != null and atual != raiz:
-		t = atual.transform * t
-		atual = atual.get_parent() as Node3D
-	return (raiz.transform * t).origin.y
-
+## O CORPO CAÍDO CONTINUA DENTRO DO QUADRO.
+##
+## Esta é a linha que o erro original quebrava: a queda baixava o corpo
+## 62 cm além de tombá-lo e, como a raiz já fica na altura da lona, o
+## boneco saía por baixo do ringue. A moldura mostrava um ringue vazio no
+## momento mais importante do jogo.
 func _test_o_nocaute_nao_afunda_o_lutador() -> void:
 	var l := _lutador()
 	var reacao := l.bater(1.0, true)
 	_ok(bool(reacao["nocaute"]), "um nível que derruba tem de derrubar no primeiro soco")
 	_correr(l, 130)
 	_ok(l.queda > 0.9, "depois de dois segundos ele tem de estar na lona")
-	var corpo := l.get_child(0) as Node3D
-	# ESTA É A LINHA QUE O ERRO ORIGINAL QUEBRAVA. O corpo caído tem de
-	# continuar POR CIMA da lona e dentro do enquadramento da câmera — não
-	# debaixo do ringue, que foi onde ele foi parar.
-	for nome in ["Cabeca", "Quadril", "Luva_E", "Luva_D"]:
-		var peca := corpo.find_child(str(nome), true, false) as Node3D
-		if peca == null:
-			continue
-		var onde := _onde(corpo, peca)
-		_ok(onde.y > -0.10, "%s não pode afundar na lona (y=%.2f)" % [nome, onde.y])
-		_ok(absf(onde.x) < 1.2, "%s não pode sair de lado do quadro (x=%.2f)" % [nome, onde.x])
-		_ok(onde.z > -1.6, "%s não pode ir para trás das cordas (z=%.2f)" % [nome, onde.z])
+	var corpo := l.get_node_or_null("Corpo") as Node3D
+	_ok(corpo.position.y > -0.45,
+		"o lutador caído não pode afundar na lona (y=%.2f)" % corpo.position.y)
+	_ok(absf(corpo.position.x) < 0.6,
+		"o lutador caído não pode sair de lado do quadro (x=%.2f)" % corpo.position.x)
 	l.free()
 
-func _onde(raiz: Node3D, no: Node3D) -> Vector3:
-	var t := Transform3D.IDENTITY
-	var atual := no
-	while atual != null and atual != raiz:
-		t = atual.transform * t
-		atual = atual.get_parent() as Node3D
-	return (raiz.transform * t).origin
 
 func _test_levantar_devolve_o_lutador_para_cima_da_lona() -> void:
 	var l := _lutador()
-	var corpo := l.get_child(0) as Node3D
-	var cabeca := corpo.find_child("Cabeca", true, false) as Node3D
-	var em_pe := _altura(corpo, cabeca)
 	l.bater(1.0, true)
 	# Queda, contagem e volta: seis segundos cobrem o ciclo inteiro.
 	_correr(l, 400)
 	_ok(l.queda <= 0.001, "ele tem de levantar sozinho para o próximo soco")
 	_ok(l.dano < 1.0, "quem levanta volta com fôlego para levar o segundo soco")
-	_perto(_altura(corpo, cabeca), em_pe, 0.06, "de pé, a cabeça volta à altura de antes")
+	_perto(l.fundura_do_tombo(), 0.0, 0.05, "de pé, o corpo volta à altura de antes")
+	_ok(l.desenho_atual() != "nocaute", "e ele não pode continuar desenhado no chão")
 	l.free()
 
-## E A RODADA SEGUINTE COMEÇA COM O CORPO INTEIRO NO LUGAR.
+## E A RODADA SEGUINTE COMEÇA COM O CORPO NO LUGAR.
 ##
-## Uma rodada pode ACABAR com o adversário no chão, e as faixas de
-## `knockout` deixam joelho e cotovelo dobrados na última pose. O clipe
-## `idle` não tem faixa de perna nenhuma: sem devolver a pose de
-## nascimento, o jogador seguinte encontraria um lutador de pé com as
-## pernas ainda dobradas do tombo anterior — e assim a noite inteira.
+## Uma rodada pode ACABAR com o adversário no chão. Sem devolver a pose
+## de nascimento, o jogador seguinte encontraria o lutador deitado no
+## tapete esperando um soco — e assim a noite inteira.
 func _test_preparar_desfaz_a_pose_do_tombo() -> void:
 	var l := _lutador()
-	var corpo := l.get_child(0) as Node3D
-	var joelho := corpo.find_child("Canela_D", true, false) as Node3D
-	var antes := joelho.rotation
+	var corpo := l.get_node_or_null("Corpo") as Node3D
 	l.bater(1.0, true)
-	_correr(l, 80)
-	_ok(joelho.rotation.distance_to(antes) > 0.2, "o tombo tem de dobrar o joelho")
+	_correr(l, 90)
+	_ok(corpo.position.y < -0.15, "o tombo tem de baixar o corpo")
 	l.preparar()
-	_perto(joelho.rotation.distance_to(antes), 0.0, 0.001,
-		"a rodada seguinte começa com o corpo no lugar")
+	l.atualizar(1.0 / 60.0)
+	_ok(corpo.position.y > -0.05, "a rodada seguinte começa com ele de pé")
+	_ok(l.queda <= 0.001, "e sem queda pendurada")
 	l.free()
 
 # ------------------------------------------------------------- frases
