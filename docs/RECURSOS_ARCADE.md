@@ -10,12 +10,16 @@
 | scripts/audio/audio_catalog.gd | Nomes, caminhos e classificação dos loops de áudio |
 | scripts/audio_bank.gd | Reprodução, volume, interrupção e redução da trilha |
 | assets/audio/arcade/ | Banco atual de WAVs originais de 48 kHz |
-| tools/gerar_audio_arcade.py | Reproduz o banco; requer Python e NumPy somente para regenerar sons |
+| tools/estudio/ | A mesa de som em GDScript: DSP, instrumentos e as receitas de cada efeito |
+| tools/gerar_audio.gd | Reescreve o banco inteiro; roda dentro do Godot, sem nada instalado |
+| tools/conferir_audio.gd | Confere um banco novo contra o do repositório (duração, pico, RMS, espectro) |
 | scripts/main.gd | Estados da partida, câmera, pontuação e montagem das telas |
 | tests/test_show_flow.gd | Captura antes da jogada, estados da abertura e controle dos sons |
 | tests/test_serial_teimoso.gd | A busca pelo Arduino: fila de portas, varredura cega, troca de caminho e ressurreição da ponte |
 
-O jogo não depende de Python para reproduzir áudio. A webcam no Windows usa
+O projeto não depende de Python para NADA — nem para jogar, nem para
+refazer o banco de áudio, nem para redesenhar o ícone, nem para construir
+o lutador da arena. A webcam no Windows usa
 o backend nativo Windows Media Foundation incluído em CameraServerExtension.
 
 ## Alteração das artes

@@ -543,16 +543,37 @@ Windows recusa a extensão em silêncio — é a causa número um de
 "funciona no meu PC e não no outro". Confira com `where VCRUNTIME140.dll`
 num terminal da máquina; nada listado quer dizer que falta.
 
-## Refazer o ícone do aplicativo
+## Refazer o som e o ícone
+
+Nada disso é preciso para JOGAR — os arquivos viajam prontos no
+repositório. É preciso para MUDAR um som ou o ícone, e é aqui que estava
+a última dependência de linguagem do projeto: o banco de áudio inteiro e
+o ícone eram sintetizados por scripts em Python, dois deles exigindo
+NumPy. Hoje é o próprio Godot que faz as duas coisas:
 
 ```
-python3 tools/gerar_icone.py
+godot --headless --path . --script tools/gerar_audio.gd
+godot --headless --path . --script tools/gerar_icone.gd
 ```
 
-Redesenha `assets/icon.png` (512 × 512) a partir da mesma silhueta de
-luva que `scripts/icones.gd` usa no jogo — a luva da barra de tarefas e
-a luva do cartão de PARTIDAS são reconhecidamente a mesma coisa. Só
-depende do Python padrão; não há dependência de imagem para instalar.
+O primeiro reescreve os 37 arquivos de `assets/audio/arcade/` em cerca
+de vinte segundos: efeitos, os oito níveis, avisos de operação, os dois
+loops, a música da abertura e os sons da arena. Para conferir um banco
+novo contra o que já está no repositório sem sobrescrevê-lo:
+
+```
+godot --headless --path . --script tools/gerar_audio.gd -- /tmp/audio_novo
+godot --headless --path . --script tools/conferir_audio.gd -- /tmp/audio_novo
+```
+
+A conferência compara duração, pico, volume percebido e a energia em três
+faixas — e não amostra por amostra, porque metade de cada som é ruído e
+ruído branco não tem forma, só estatística.
+
+O segundo redesenha `assets/icon.png` (512 × 512) a partir da mesma
+silhueta de luva que `scripts/icones.gd` usa no jogo — a luva da barra de
+tarefas e a luva do cartão de PARTIDAS são reconhecidamente a mesma
+coisa.
 
 ## Documentação
 
