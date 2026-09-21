@@ -58,6 +58,7 @@ godot --headless --path . --script tests/test_show_flow.gd
 godot --headless --path . --script tests/test_serial_teimoso.gd
 godot --headless --path . --script tests/test_arena.gd
 godot --headless --path . --script tests/test_quadro_liso.gd
+godot --headless --path . --script tests/test_enquadramento_responsivo.gd
 sh tools/conferir_ponte.sh
 ```
 

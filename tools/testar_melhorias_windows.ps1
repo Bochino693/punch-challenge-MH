@@ -34,7 +34,8 @@ $Tests = @(
     "tests/test_descoberta_da_porta.gd",
     "tests/test_native_reentry.gd",
     "tests/test_ponte_teimosa.gd",
-    "tests/test_serial_teimoso.gd"
+    "tests/test_serial_teimoso.gd",
+    "tests/test_enquadramento_responsivo.gd"
 )
 
 foreach ($Test in $Tests) {

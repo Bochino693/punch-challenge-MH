@@ -30,6 +30,8 @@ window/size/mode=3
 window/size/window_width_override=810
 window/size/window_height_override=1440
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/stretch/scale_mode="fractional"
 window/handheld/orientation=1
 vsync/vsync_mode=2
 

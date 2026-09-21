@@ -87,7 +87,7 @@ func run() -> void:
 	_test_fila_gira_e_nao_repete()
 	_test_hit_fura_fila_de_telemetria()
 	_test_ponte_nao_pula_portas_da_busca()
-	_test_start_exige_mpu_e_sinal_atual()
+	_test_start_exige_apenas_arduino_identificado()
 	_test_ready_fixa_a_com_durante_calibracao()
 	_test_quedas_repetidas_revogam_o_caminho()
 	await _test_a_ponte_ressuscita_sozinha()
@@ -371,9 +371,9 @@ func _test_ponte_nao_pula_portas_da_busca() -> void:
 	assert(PonteProcessoLink.ESPERA_ENTRE_ABERTURAS_MS <= 150)
 
 # ----------------------------------------------------------------------
-#  8. PORTA ABERTA NAO VENDE PARTIDA SEM MPU
+#  8. ARDUINO IDENTIFICADO LIBERA START SEM ESPERAR O SENSOR
 # ----------------------------------------------------------------------
-func _test_start_exige_mpu_e_sinal_atual() -> void:
+func _test_start_exige_apenas_arduino_identificado() -> void:
 	var falso := LinkFalso.new()
 	_por_link(falso)
 	falso.open_port("COMBOA")
@@ -384,11 +384,12 @@ func _test_start_exige_mpu_e_sinal_atual() -> void:
 	jogo._on_serial_line("PONG")
 	assert(jogo.placa_respondeu)
 	assert(not jogo._sensor_ligado())
+	assert(jogo._arduino_conectado())
 	jogo._iniciar_rodada()
-	assert(jogo.state == GameDef.State.IDLE)
-	assert("SENSOR" in jogo.motivo_da_recusa())
+	assert(jogo.state == GameDef.State.COUNTDOWN)
 
-	# A variante optica exige identidade antes de aceitar a calibracao.
+	# O sensor continua podendo aparecer e ser calibrado em segundo plano.
+	jogo.state = GameDef.State.IDLE
 	jogo._on_serial_line("READY,PUNCH_OPTICAL,V1")
 	jogo._on_serial_line("CALIBRATED,0.0,0.0,1.0")
 	assert(jogo._sensor_ligado())

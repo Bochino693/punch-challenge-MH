@@ -710,6 +710,7 @@ var logo: Texture2D = null
 @onready var arena: Arena3D = $Arena
 
 func _ready() -> void:
+	_configurar_enquadramento_universal()
 	fonte = ThemeDB.fallback_font
 	if ResourceLoader.exists("res://assets/fonts/Bungee-Regular.ttf"):
 		fonte = load("res://assets/fonts/Bungee-Regular.ttf")
@@ -754,6 +755,21 @@ func _ready() -> void:
 	# de simplesmente parar. As deixas da entrada tocam por cima.
 	sons.music(-30.0)
 	set_process(true)
+
+## Mantém o quadro lógico em 1080x1920 e deixa o Godot calcular a escala
+## final. Não aplicamos margem nem reduzimos o nó raiz: em uma tela 9:16 o
+## jogo ocupa todos os pixels, sem a moldura que a primeira correção criou.
+## Em outra proporção, `KEEP` preserva o desenho sem zoom, corte ou deformação.
+func _configurar_enquadramento_universal() -> void:
+	var janela := get_window()
+	if janela != null:
+		janela.content_scale_size = Vector2i(int(TELA.x), int(TELA.y))
+		janela.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+		janela.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+		janela.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_FRACTIONAL
+	pivot_offset = Vector2.ZERO
+	scale = Vector2.ONE
+	position = Vector2.ZERO
 
 ## PÕE O LUTADOR NA ARENA.
 ##
@@ -1665,21 +1681,21 @@ func camera_liberou_a_rodada() -> bool:
 		return false
 	return camera_service.pronta()
 
+## A placa, e não o estado de descoberta/calibração do sensor, libera START.
+## Uma linha válida do protocolo identifica que a porta aberta é realmente o
+## Arduino do gabinete. O sensor continua sendo procurado e armado em segundo
+## plano para medir o golpe, mas sua preparação nunca mais prende o jogador na
+## abertura.
+func _arduino_conectado() -> bool:
+	return link != null and link.is_open() and placa_respondeu
+
 func rodada_liberada() -> bool:
-	return _sensor_ligado() and camera_liberou_a_rodada()
+	return _arduino_conectado() and camera_liberou_a_rodada()
 
 ## O que dizer a quem apertou START e a máquina não começou.
 func motivo_da_recusa() -> String:
-	if link == null or not link.is_open() or not placa_respondeu:
-		return "AGUARDE — CONECTANDO O SENSOR"
-	if placa_calibrando:
-		return "PREPARANDO O SENSOR… %d%%" % progresso_calibracao
-	if not sensor_presente:
-		if not mensagem_sensor_publica.is_empty():
-			return mensagem_sensor_publica
-		return "SENSOR DE SOCO INDISPONÍVEL"
-	if ultimo_sinal_ms < 0 or Time.get_ticks_msec() - ultimo_sinal_ms > 2000:
-		return "AGUARDE — CONFIRMANDO O SENSOR"
+	if not _arduino_conectado():
+		return "AGUARDE — CONECTANDO O ARDUINO"
 	if not camera_enabled:
 		return "CÂMERA DESLIGADA"
 	if camera_service == null:
@@ -1687,8 +1703,8 @@ func motivo_da_recusa() -> String:
 	return camera_service.estado_curto()
 
 func _iniciar_rodada() -> void:
-	# SENSOR E CÂMERA VÊM ANTES DA FICHA. Porta apenas aberta não basta:
-	# START só libera com placa identificada, MPU confirmado e sinal atual.
+	# ARDUINO E CÂMERA VÊM ANTES DA FICHA. O sensor não bloqueia mais o
+	# início: a busca e a calibração continuam paralelamente durante a rodada.
 	if not rodada_liberada():
 		_show_notice(motivo_da_recusa())
 		sons.play("start_negado", -3.0)
