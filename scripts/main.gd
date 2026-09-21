@@ -334,6 +334,11 @@ var rodada_encerrada_antecipadamente := false
 ## quando a placa não responde. Ver `scripts/saco_motor.gd`, que é curto
 ## de propósito: tudo o que pode ligar um motor cabe numa página.
 var saco := SacoMotor.new()
+
+## A FAXINA DAS FOTOS, correndo por fora do clique que a pediu.
+## Ver scripts/faxina.gd: apagar centenas de arquivos dentro do clique
+## congela a tela com a fila esperando.
+var faxina := Faxina.new()
 ## QUANTO O RESULTADO DE UM SOCO FICA À VISTA ANTES DE PEDIR O PRÓXIMO.
 ##
 ## Contado a partir do VEREDITO, não do golpe: o placar já subiu e o nome
@@ -921,6 +926,9 @@ func _process(delta: float) -> void:
 	# A gravação pendente sai assim que a anterior termina, e nunca no
 	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
 	SettingsStore.bombear()
+	# Algumas fotos por quadro, se houver faxina aberta. Sem faxina, não
+	# custa nada; com faxina, o jogo continua aceitando soco e START.
+	faxina.passo()
 	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
 	# O PASSO DO JOGO NÃO É MAIS O TEMPO CRU DO QUADRO.
@@ -3589,10 +3597,29 @@ func _click_central(p: Vector2) -> void:
 	elif _tocou("zerar_ranking", p):
 		if not _confirmar("ranking"):
 			return
-		RankingStore.clear_photos(ranking)
+		if faxina.rodando:
+			_show_notice("A FAXINA ANTERIOR AINDA ESTÁ CORRENDO")
+			return
+		# A ORDEM AQUI É O QUE IMPEDE O RESET DE QUEBRAR O JOGO.
+		#
+		# Primeiro a pasta é LIDA (as vinte da lista e todas as órfãs que
+		# ninguém apagava), depois a lista some e o arquivo é gravado, e
+		# só então os arquivos começam a sair — algumas por quadro, por
+		# fora deste clique.
+		#
+		# Gravar antes de apagar é deliberado: se a energia cair no meio
+		# da faxina, sobra foto órfã na pasta, que a próxima faxina leva.
+		# Ao contrário, sobraria um ranking apontando para fotos que não
+		# existem mais — e aí a tela de recordes quebra de verdade.
+		var fotos := RankingStore.listar_fotos()
 		ranking.clear()
 		_photo_cache.clear()
-		_show_notice("RANKING E FOTOS ZERADOS")
+		_salvar()
+		faxina.comecar(fotos)
+		_show_notice(
+			"RANKING ZERADO — APAGANDO %d FOTOS AO FUNDO" % fotos.size()
+			if fotos.size() > 0 else "RANKING ZERADO — NÃO HAVIA FOTOS"
+		)
 	elif _tocou("usar_min", p) or _tocou("usar_ref", p) or _tocou("usar_max", p):
 		# REGULAR A MÁQUINA COM UM SOCO E UM TOQUE.
 		#
@@ -5838,11 +5865,33 @@ func _central_dados() -> void:
 		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
-	_secao(Rect2(80, DADOS_APAGAR_Y, 920, 150), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	# APAGAR MOSTRA O QUE ESTÁ FAZENDO.
+	#
+	# O clique sumia com o ranking e devolvia a tela; as fotos saíam de
+	# fininho (ou nem saíam). Sem número na tela, "apagou tudo?" só tinha
+	# uma resposta possível: abrir a pasta pelo Windows. Agora a linha e
+	# a barra contam a faxina inteira, e continuam contando se o operador
+	# sair da Central e voltar.
+	_secao(Rect2(80, DADOS_APAGAR_Y, 920, 218), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
+	_botao(
+		BOTOES_SIMPLES["zerar_ranking"],
+		"APAGANDO…" if faxina.rodando else "RANKING + FOTOS",
+		false, Paleta.VERMELHO, 13, faxina.rodando
+	)
 	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+	var base_faxina := DADOS_APAGAR_Y + 166.0
+	_andamento(
+		Rect2(110, base_faxina - 16.0, 860, 10), faxina.progresso(),
+		Paleta.AMBAR if faxina.rodando else Paleta.VERDE
+	)
+	_texto(
+		faxina.ficha() if faxina.total > 0 else "a pasta guarda a foto de quem já saiu do ranking; o RANKING + FOTOS leva todas",
+		base_faxina + 24.0, 15,
+		Paleta.AMBAR if faxina.rodando else Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
 
 ## UMA PILHA DE LINHAS DENTRO DE UMA SEÇÃO DA CENTRAL.
 ##
@@ -6264,6 +6313,17 @@ func _draw_alertas_graves() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
 		)
 
+## UMA BARRA DE ANDAMENTO. `quanto` vai de 0 a 1.
+##
+## Existe porque "está fazendo alguma coisa" e "travou" são a mesma
+## imagem numa tela parada — e a diferença entre as duas é o que decide
+## se o operador espera ou desliga a máquina no botão.
+func _andamento(rect: Rect2, quanto: float, accent: Color) -> void:
+	_cartao(rect, Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
+	var cheio := clampf(quanto, 0.0, 1.0) * rect.size.x
+	if cheio > 1.0:
+		draw_rect(Rect2(rect.position, Vector2(cheio, rect.size.y)), accent)
+
 ## A peça padrão da tela: retângulo branco com sombra e borda. Todo painel
 ## do jogo passa por aqui, então a "altura" das peças é a mesma em toda
 ## parte — e mudar a sombra do jogo inteiro é mudar uma função.
@@ -6276,12 +6336,20 @@ func _cartao(rect: Rect2, fundo_c: Color, borda: Color, alpha := 1.0, largura_bo
 ## Botão: colorido e cheio quando ativo, branco com borda colorida quando
 ## não. Num tema claro é o PREENCHIMENTO que marca o estado ligado —
 ## borda mais grossa sozinha não se lê de longe.
-func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int) -> void:
-	var fundo_c := accent if ativo else Paleta.CARTAO
-	var tinta := Paleta.CARTAO if ativo else Paleta.para_texto(accent)
+##
+## `desligado` desbota o botão enquanto ele não aceita clique. Um botão
+## que não responde precisa PARECER que não responde: se continuar com a
+## cara de sempre, o operador clica de novo, e de novo, e conclui que a
+## máquina travou — bem na hora em que ela está trabalhando.
+func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int, desligado := false) -> void:
+	var cor := Paleta.tinta_clara(accent, 0.45) if desligado else accent
+	var fundo_c := cor if ativo else Paleta.CARTAO
+	var tinta := Paleta.CARTAO if ativo else Paleta.para_texto(cor)
+	if desligado:
+		tinta = Paleta.TINTA_LEVE
 	draw_rect(Rect2(rect.position + Vector2(0, 3.0), rect.size), Paleta.SOMBRA)
 	draw_rect(rect, fundo_c)
-	draw_rect(rect, Color(accent, 0.9), false, 2.0)
+	draw_rect(rect, Color(cor, 0.9), false, 2.0)
 	_texto_cabendo(
 		texto, rect.position.y + rect.size.y * 0.68, tamanho, tinta,
 		rect.size.x - 20.0, rect.position.x + 10.0
