@@ -1,21 +1,13 @@
 param(
-    [string]$Godot = "",
-    [switch]$PularGeracaoGLB
+    [string]$Godot = ""
 )
 
+# O LUTADOR NAO E MAIS GERADO AQUI. Ele e construido pelo proprio jogo,
+# em GDScript, quando a arena sobe: nao ha .glb para produzir, nem
+# Blender, nem Python. O que sobrou deste script e o que ele sempre
+# deveria ter sido — importar os recursos e rodar a bateria de testes.
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-
-if (-not $PularGeracaoGLB) {
-    & (Join-Path $PSScriptRoot "gerar_personagem_windows.ps1")
-}
-
-$Python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $Python) { $Python = Get-Command py -ErrorAction SilentlyContinue }
-if ($Python) {
-    & $Python.Source (Join-Path $PSScriptRoot "validar_glb.py")
-    if ($LASTEXITCODE -ne 0) { throw "O GLB não passou na validação de rig/animações" }
-}
 
 if ([string]::IsNullOrWhiteSpace($Godot)) {
     $Godot = Get-ChildItem (Join-Path $env:USERPROFILE "Downloads") -Filter "Godot_v4*.exe" -File -ErrorAction SilentlyContinue |

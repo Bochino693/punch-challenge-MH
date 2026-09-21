@@ -706,30 +706,25 @@ func _ready() -> void:
 
 ## PÕE O LUTADOR NA ARENA.
 ##
-## O GLB é carregado UMA VEZ, no arranque, e nunca no meio de uma rodada:
-## carregar malha durante o jogo é engasgo garantido, e é justamente no
-## primeiro soco que ele apareceria.
+## O CORPO É CONSTRUÍDO UMA VEZ, no arranque, e nunca no meio de uma
+## rodada: montar malha durante o jogo é engasgo garantido, e é
+## justamente no primeiro soco que ele apareceria.
 ##
-## FALTAR O ARQUIVO NÃO PODE DERRUBAR A MÁQUINA. Um gabinete no salão não
-## tem quem conserte às onze da noite: sem o `.glb`, a arena fica sendo um
-## ringue vazio com as luzes acesas e o jogo segue inteiro — placar,
-## ranking, foto, tudo. É pior do que com o lutador, e é infinitamente
-## melhor do que uma tela preta.
+## E NÃO HÁ MAIS ARQUIVO PARA FALTAR. Antes isto carregava um `.glb` que
+## um script em Python gerava, com todo o cuidado necessário para o caso
+## de a máquina chegar ao salão sem ele dentro. O lutador agora é código
+## (`LutadorNativo`): ele existe sempre que o jogo existe, e ajustar uma
+## proporção deixou de passar pelo Blender.
 func _montar_arena() -> void:
 	if arena == null:
 		return
 	arena.qualidade = desempenho.qualidade
-	var caminho := "res://assets/personagem/lutador.glb"
-	if not ResourceLoader.exists(caminho):
-		push_warning("Arena sem lutador: %s não existe" % caminho)
-		return
-	var cena := load(caminho)
-	if cena is PackedScene and arena.instalar(cena as PackedScene):
+	if arena.instalar():
 		arena.preparar()
 		if not arena.modelo_avancado():
-			push_warning("Personagem leve ativo. Execute GERAR_PERSONAGEM.bat e reabra o Godot para usar o humanoide Blender.")
+			push_warning("Arena: o lutador subiu sem todas as nove ações.")
 	else:
-		push_warning("Arena: %s não abriu como cena 3D" % caminho)
+		push_warning("Arena: o lutador não pôde ser montado.")
 
 ## A ARENA SÓ EXISTE NAS TELAS EM QUE APARECE.
 ##
@@ -4982,15 +4977,15 @@ func _central_operacao() -> void:
 	_secao(Rect2(80, 920, 920, 225), "PERSONAGEM DA ARENA", Paleta.VERDE)
 	var avancado := arena != null and arena.modelo_avancado()
 	_texto(
-		"HUMANOIDE BLENDER • TEXTURA CARTOON" if avancado else "MODELO LEVE ATIVO",
+		"LUTADOR NATIVO • NOVE AÇÕES" if avancado else "LUTADOR INCOMPLETO",
 		1000.0, 24, Paleta.VERDE if avancado else Paleta.AMBAR
 	)
 	_texto(
-		"Pronto para o salão" if avancado else "Execute GERAR_PERSONAGEM.bat e reabra o Godot",
+		"Pronto para o salão" if avancado else "Alguma ação não subiu — veja o registro",
 		1045.0, 17, Paleta.CREME
 	)
 	_texto(
-		"Este indicador confirma qual arquivo foi realmente importado pelo jogo.",
+		"O corpo é construído pelo próprio jogo: não há arquivo de modelo para faltar.",
 		1086.0, 14, Paleta.TINTA_FRACA
 	)
 

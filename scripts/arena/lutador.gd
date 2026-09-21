@@ -145,7 +145,14 @@ var em_guarda := false
 func montar(corpo: Node3D) -> void:
 	_raiz = corpo
 	add_child(corpo)
+	# O CORPO NATIVO CHEGA SEM TOCADOR, e ganha um aqui: as nove ações são
+	# tabelas de ângulos (`LutadorAnimacao`) montadas em faixas de posição
+	# e rotação na hora. Um corpo que já traga o seu tocador — um `.glb`
+	# que alguém queira pôr no lugar — continua valendo, e é por isto que
+	# a busca vem antes.
 	_animador = _achar_animador(corpo)
+	if _animador == null:
+		_animador = LutadorAnimacao.montar(corpo)
 	_esqueleto = _achar_esqueleto(corpo)
 	_indexar_animacoes()
 	_ajustar_loops()
@@ -166,6 +173,32 @@ func montar(corpo: Node3D) -> void:
 			_juntas[nome] = no
 			_repouso[nome] = (no as Node3D).transform
 	_repouso["__raiz__"] = corpo.transform
+	_guardar_o_repouso(corpo)
+
+## A POSE DE REPOUSO DE CADA PEÇA, GUARDADA UMA VEZ.
+##
+## É o conserto de um defeito que só aparece no fim de uma noite movimentada:
+## uma rodada pode ACABAR com o adversário no chão, e as faixas de
+## `knockout` deixam joelho e cotovelo dobrados na última pose. O clipe
+## `idle` não tem faixa de perna nenhuma — ele anima tronco, cabeça e
+## ombro —, então o jogador seguinte encontraria um lutador de pé com as
+## pernas ainda dobradas do tombo anterior, para sempre.
+##
+## Guardando a pose de nascimento de TODAS as peças, `preparar` devolve o
+## corpo inteiro ao lugar antes do primeiro quadro da próxima rodada.
+var _pose_inicial: Array[Node3D] = []
+var _transforma_inicial: Array[Transform3D] = []
+
+func _guardar_o_repouso(no: Node) -> void:
+	if no is Node3D:
+		_pose_inicial.append(no as Node3D)
+		_transforma_inicial.append((no as Node3D).transform)
+	for filho in no.get_children():
+		_guardar_o_repouso(filho)
+
+func _voltar_ao_repouso() -> void:
+	for i in range(_pose_inicial.size()):
+		_pose_inicial[i].transform = _transforma_inicial[i]
 
 ## A BOCA QUE O MODELO NUNCA TEVE.
 ##
@@ -231,6 +264,19 @@ func cor_da_peca(malha: MeshInstance3D) -> Variant:
 
 func tem_esqueleto() -> bool:
 	return _esqueleto != null and _esqueleto.get_bone_count() >= 15
+
+## O LUTADOR ESTÁ COMPLETO quando as nove ações existem de verdade.
+##
+## Esta é a pergunta que a Central faz, e antes ela era "tem esqueleto?" —
+## uma pergunta sobre o FORMATO do arquivo, que respondia "modelo leve
+## ativo, rode o GERAR_PERSONAGEM.bat" para um corpo perfeitamente
+## completo. O que importa a quem opera a máquina não é como o boneco foi
+## construído: é se ele sabe apanhar, cambalear, cair e levantar.
+func completo() -> bool:
+	for papel in ALIASES:
+		if not _animacoes.has(papel):
+			return false
+	return true
 
 func animacoes_disponiveis() -> PackedStringArray:
 	var nomes := PackedStringArray()
@@ -317,6 +363,12 @@ func _tocar(papel: String, mistura := 0.16, velocidade := 1.0) -> bool:
 	return true
 
 func preparar() -> void:
+	# O CORPO VOLTA INTEIRO AO LUGAR antes de qualquer coisa. Ver
+	# `_guardar_o_repouso`: sem isto, uma rodada encerrada com o adversário
+	# na lona entregaria o próximo jogador um lutador de joelhos dobrados.
+	if _animador != null:
+		_animador.stop()
+	_voltar_ao_repouso()
 	dano = 0.0
 	queda = 0.0
 	_caindo = false

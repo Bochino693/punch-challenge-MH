@@ -17,31 +17,35 @@ Central Técnica — com **uma** diferença, na tela do soco:
 > à lona quando não aguenta mais, e tem o estado mostrado nas **colunas
 > de dano** das laterais. A cada soco a máquina grita uma frase.
 
-O lutador é um arquivo `.glb` de verdade (abre no Blender, troca sem
-programar). Como ele é feito, como trocá-lo, quanto custa numa TV Box e o
-que os testes guardam: **[`docs/ARENA.md`](docs/ARENA.md)**.
+O lutador **não é um arquivo**: ele é construído pelo próprio jogo, em
+GDScript, quando a arena sobe. Como ele é feito, quanto custa numa TV Box
+e o que os testes guardam: **[`docs/ARENA.md`](docs/ARENA.md)**.
 
-## Gerar e testar o humanoide no Windows
+## O lutador não depende de nada para existir
 
-O ZIP já inclui o lutador leve com as nove animações. Para recriar a
-versão humanoide de alta definição, instale Blender 4.2 ou superior e dê
-dois cliques em `GERAR_PERSONAGEM.bat`. O equivalente no terminal é:
+Até a versão anterior o boneco era um `.glb` gerado por um script em
+Python, com um caminho alternativo que passava pelo Blender. Isso custava
+três coisas ao mesmo tempo:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\gerar_personagem_windows.ps1
-powershell -ExecutionPolicy Bypass -File .\tools\testar_melhorias_windows.ps1 -PularGeracaoGLB
-```
+* uma **dependência de linguagem** para quem quisesse mexer no
+  personagem — e uma máquina de salão não pode depender de ninguém ter
+  Python ou Blender instalado;
+* um **arquivo que podia faltar**. `embed_pck` faz o `.exe` parecer
+  autossuficiente, e um gabinete entregue sem o modelo dentro mostrava
+  um ringue vazio;
+* um **ciclo de ajuste que saía do Godot**. Cada milímetro de proporção
+  era uma viagem de ida e volta pelo Blender, e foi por isso que o
+  personagem demorou tanto a ficar bom.
 
-O primeiro comando cria `assets/personagem/lutador.glb` com uma malha
-skinned, 24 ossos e nove animações. O segundo reimporta o GLB, roda os
-testes e abre o editor para inspeção. Executáveis fora das pastas padrão
-podem ser informados pelos parâmetros `-Blender` e `-Godot`.
+Hoje o corpo é código: `scripts/arena/figura.gd` fabrica as formas
+torneadas e `scripts/arena/lutador_nativo.gd` as monta com as proporções
+do personagem. As nove ações também: `scripts/arena/lutador_animacao.gd`
+é a tabela de ângulos de cada gesto, montada em faixas de animação na
+hora. Mudar o V do tronco, a altura da guarda ou a força de um soco
+levado é mudar um número e rodar o jogo.
 
-Depois da geração, abra **Central Técnica → Operação**. O quadro do
-personagem deve mostrar **HUMANOIDE BLENDER • TEXTURA CARTOON**. Se
-mostrar **MODELO LEVE ATIVO**, o GLB novo ainda não foi reimportado; feche
-e reabra o Godot. O gerador tenta fazer essa importação automaticamente
-quando encontra o executável do editor na pasta Downloads.
+Em **Central Técnica → Operação**, o quadro do personagem mostra
+**LUTADOR NATIVO • NOVE AÇÕES**.
 
 O repositório original continua sendo a versão de referência: correção de
 sensor, de câmera ou de ranking deve entrar nos dois, e o código fora de

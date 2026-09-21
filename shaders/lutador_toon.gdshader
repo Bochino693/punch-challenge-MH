@@ -36,8 +36,17 @@ shader_type spatial;
 
 render_mode unshaded, cull_back, depth_draw_opaque, shadows_disabled;
 
-// A cor da peça, vinda do material original do GLB.
+// A cor da peça. Para um corpo cujas peças foram fundidas numa malha só
+// (ver `Figura.fundir`) ela é branca, e quem manda é a cor do VÉRTICE —
+// é assim que cabeça, cabelo, olhos, sobrancelhas, nariz, boca e os sete
+// espetos do cabelo cabem numa chamada de desenho em vez de dezenove.
 uniform vec4 cor_base : source_color = vec4(0.91, 0.64, 0.44, 1.0);
+
+varying vec3 cor_do_vertice;
+
+void vertex() {
+	cor_do_vertice = COLOR.rgb;
+}
 
 // De onde vem a luz principal, em coordenadas do mundo. Combina com o
 // refletor que o cenário 2D já desenha caindo sobre o saco.
@@ -70,6 +79,7 @@ uniform float forca_do_contorno = 0.85;
 uniform float clarao = 0.0;
 
 void fragment() {
+	vec3 tinta = cor_base.rgb * cor_do_vertice;
 	vec3 n = normalize(NORMAL);
 	// A direção da luz vem do mundo e precisa chegar ao espaço da câmera,
 	// senão a iluminação gira junto com o passeio da câmera e o lutador
@@ -87,8 +97,8 @@ void fragment() {
 	float banda = (degrau + smoothstep(0.42, 0.58, sobra)) / degraus;
 
 	// A sombra puxa para o tom frio em vez de apagar para o cinza.
-	vec3 na_sombra = mix(cor_base.rgb, tom_da_sombra.rgb * cor_base.rgb * 1.6, profundidade_da_sombra);
-	vec3 cor = mix(na_sombra, cor_base.rgb, banda);
+	vec3 na_sombra = mix(tinta, tom_da_sombra.rgb * tinta * 1.6, profundidade_da_sombra);
+	vec3 cor = mix(na_sombra, tinta, banda);
 
 	// AS DUAS LUZES DE CONTORNO. A escolha pelo lado do normal em vez de
 	// duas luzes de verdade: custa uma linha e dá o mesmo recorte.
