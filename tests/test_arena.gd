@@ -18,7 +18,7 @@ extends SceneTree
 ## ao resto do jogo: dano que só sobe dentro da rodada, frase que não
 ## troca sozinha, som que existe de verdade no disco.
 
-const CAMINHO_DO_GLB := "res://assets/personagem/lutador.glb"
+
 
 var falhas := 0
 
@@ -31,7 +31,9 @@ func _perto(a: float, b: float, folga: float, o_que: String) -> void:
 	_ok(absf(a - b) <= folga, "%s (%.4f vs %.4f)" % [o_que, a, b])
 
 func _initialize() -> void:
-	_test_o_glb_existe_e_tem_contrato_humanoide()
+	_test_o_lutador_nasce_completo()
+	_test_o_corpo_e_um_atleta()
+	_test_o_corpo_custa_pouco_para_desenhar()
 	_test_a_janela_tem_a_proporcao_do_buraco()
 	_test_as_barras_cabem_na_moldura()
 	_test_a_postura_parada_se_repete()
@@ -42,6 +44,7 @@ func _initialize() -> void:
 	_test_o_nocaute_derruba_de_verdade()
 	_test_o_nocaute_nao_afunda_o_lutador()
 	_test_levantar_devolve_o_lutador_para_cima_da_lona()
+	_test_preparar_desfaz_a_pose_do_tombo()
 	_test_as_frases_cobrem_todos_os_niveis()
 	_test_a_frase_nao_troca_sozinha()
 	_test_os_sons_da_arena_existem()
@@ -50,22 +53,85 @@ func _initialize() -> void:
 		print("ARENA_OK")
 	quit(1 if falhas > 0 else 0)
 
-# ----------------------------------------------------------------- GLB
-func _test_o_glb_existe_e_tem_contrato_humanoide() -> void:
-	_ok(ResourceLoader.exists(CAMINHO_DO_GLB), "o lutador em GLB tem de estar no disco")
-	if not ResourceLoader.exists(CAMINHO_DO_GLB):
-		return
-	var cena := load(CAMINHO_DO_GLB) as PackedScene
-	_ok(cena != null, "o GLB tem de abrir como cena")
-	if cena == null:
-		return
-	var corpo := cena.instantiate()
-	var controle := Lutador3D.new()
-	controle.montar(corpo as Node3D)
+# ------------------------------------------------------------- o lutador
+## O LUTADOR NASCE INTEIRO, SEM ARQUIVO NENHUM.
+##
+## Antes o corpo vinha de `assets/personagem/lutador.glb`, gerado por um
+## script em Python. Isso queria dizer duas coisas ruins: o jogo podia
+## chegar ao salão sem o boneco dentro, e ajustar uma proporção exigia
+## Python e Blender na máquina de quem mexesse. Agora ele é montado em
+## GDScript (`LutadorNativo`) e não há arquivo para faltar — mas há um
+## contrato novo a guardar: as nove ações precisam existir mesmo assim.
+func _test_o_lutador_nasce_completo() -> void:
+	var controle := _lutador()
 	var animacoes := controle.animacoes_disponiveis()
 	for nome in Lutador3D.ALIASES:
-		_ok(nome in animacoes, "o GLB precisa da animação %s" % nome)
+		_ok(nome in animacoes, "o lutador precisa da ação %s" % nome)
+	_ok(controle.completo(), "o lutador tem de nascer com o contrato inteiro")
 	controle.free()
+
+## A SILHUETA É O PERSONAGEM, e ela é conferível em números.
+##
+## A queixa que originou esta reformulação foi "está parecendo um
+## gordinho". O boneco anterior tinha ombro de 0,50 m e cintura de 0,38:
+## um e pouco para um, que é a proporção de um barril e nenhuma
+## iluminação conserta. Estes números são os que fazem a figura ler como
+## atleta a três metros da máquina, e um ajuste que os quebre tem de
+## falhar aqui e não no salão.
+func _test_o_corpo_e_um_atleta() -> void:
+	var corpo := LutadorNativo.montar()
+	var ombro_e := corpo.find_child("Ombro_E", true, false) as Node3D
+	var ombro_d := corpo.find_child("Ombro_D", true, false) as Node3D
+	var largura_do_ombro := absf(ombro_d.position.x - ombro_e.position.x)
+	var cintura := 0.0
+	for passo in LutadorNativo.P_TRONCO:
+		cintura = (passo as Vector2).y if cintura == 0.0 else minf(cintura, (passo as Vector2).y)
+	var peito := 0.0
+	for passo in LutadorNativo.P_TRONCO:
+		peito = maxf(peito, (passo as Vector2).y)
+	_ok(peito / cintura > 1.8, "o tronco precisa do V (peito %.3f / cintura %.3f)" % [peito, cintura])
+	_ok(largura_do_ombro > peito * 2.0,
+		"o ombro precisa passar da caixa torácica (%.3f vs %.3f)" % [largura_do_ombro, peito * 2.0])
+	# E O QUADRIL NÃO PODE SER MAIS LARGO QUE O PEITO. Enquanto foi, a
+	# silhueta era uma pera por mais músculo que o tronco tivesse — e foi
+	# esse o defeito que sobreviveu à primeira reformulação inteira.
+	var quadril := 0.0
+	for passo in LutadorNativo.P_QUADRIL:
+		quadril = maxf(quadril, (passo as Vector2).y)
+	_ok(quadril < peito, "o quadril não pode ser mais largo que o peito (%.3f vs %.3f)" % [quadril, peito])
+	# A LUVA É PROPORCIONAL AO PUNHO, e não à cabeça: luva do tamanho da
+	# cabeça é linguagem de desenho infantil e ainda escondia o rosto
+	# inteiro na guarda.
+	var luva := corpo.find_child("Luva_D", true, false) as MeshInstance3D
+	var cabeca := corpo.find_child("Cabeca", true, false) as MeshInstance3D
+	_ok(luva != null and cabeca != null, "luva e cabeça têm de existir")
+	corpo.free()
+
+## O CORPO INTEIRO CABE EM POUCAS CHAMADAS DE DESENHO.
+##
+## Sessenta e três peças soltas seriam sessenta e três chamadas, e cento e
+## vinte e seis com a passada do contorno. Chamada de desenho é trabalho
+## de processador, é o que uma TV Box tem de pior, e aparece como engasgo
+## e não como queda suave de quadros. `Figura.fundir` costura tudo o que
+## não se mexe sozinho dentro da junta que o carrega.
+func _test_o_corpo_custa_pouco_para_desenhar() -> void:
+	var corpo := LutadorNativo.montar()
+	var desenhos := 0
+	for malha in _todas_as_malhas(corpo):
+		if malha.mesh != null:
+			desenhos += malha.mesh.get_surface_count()
+	_ok(desenhos <= 14, "o corpo não pode passar de 14 chamadas de desenho (são %d)" % desenhos)
+	_ok(desenhos >= LutadorNativo.JUNTAS_MOVEIS.size(),
+		"cada junta com movimento próprio precisa da sua malha")
+	corpo.free()
+
+func _todas_as_malhas(no: Node) -> Array[MeshInstance3D]:
+	var achadas: Array[MeshInstance3D] = []
+	if no is MeshInstance3D:
+		achadas.append(no as MeshInstance3D)
+	for filho in no.get_children():
+		achadas.append_array(_todas_as_malhas(filho))
+	return achadas
 
 # -------------------------------------------------------------- moldura
 func _test_a_janela_tem_a_proporcao_do_buraco() -> void:
@@ -89,10 +155,18 @@ func _test_as_barras_cabem_na_moldura() -> void:
 # ------------------------------------------------------------- o corpo
 func _lutador() -> Lutador3D:
 	var l := Lutador3D.new()
-	var corpo := (load(CAMINHO_DO_GLB) as PackedScene).instantiate()
-	l.montar(corpo as Node3D)
+	l.montar(LutadorNativo.montar())
 	l.preparar()
 	return l
+
+## O TOCADOR SÓ ANDA SOZINHO DENTRO DA ÁRVORE. Fora dela — que é onde um
+## teste vive — `advance` dá exatamente o passo que o motor daria, e é o
+## que permite medir a pose de um gesto sem subir a cena inteira.
+func _correr(l: Lutador3D, quadros: int) -> void:
+	for i in range(quadros):
+		l.atualizar(1.0 / 60.0)
+		if l._animador != null:
+			l._animador.advance(1.0 / 60.0)
 
 ## A POSTURA PARADA TEM DE SE REPETIR, E NÃO RECOMEÇAR.
 ##
@@ -210,17 +284,21 @@ func _test_desdenho_usa_a_nota_e_respeita_a_lona() -> void:
 ## delas dá para ver num quadro isolado.
 func _test_o_nocaute_derruba_de_verdade() -> void:
 	var l := _lutador()
-	if l._esqueleto == null or l._osso_raiz < 0:
-		l.free()
-		return
-	var em_pe := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	var corpo := l.get_child(0) as Node3D
+	var cabeca := corpo.find_child("Cabeca", true, false) as Node3D
+	var em_pe := _altura(corpo, cabeca)
 	l.bater(1.0, true, 9600)
-	for i in range(120):
-		l.atualizar(1.0 / 60.0)
+	_correr(l, 130)
 	_ok(l.queda > 0.9, "depois do nocaute o lutador tem de estar no chão")
-	var deitado := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
-	var angulo := rad_to_deg(em_pe.angle_to(deitado))
-	_ok(angulo > 55.0, "o corpo tem de girar de verdade (girou %.0f°)" % angulo)
+	var deitado := _altura(corpo, cabeca)
+	# A CABEÇA TEM DE CHEGAR PERTO DA LONA. Não basta inclinar: o boneco
+	# antigo movia a cabeça quatro centímetros e voltava, enquanto o jogo
+	# tocava som de queda, anunciava NOCAUTE e levava a câmera para a
+	# altura do tapete — o momento mais importante da partida era a
+	# câmera olhando para um pedaço vazio de lona.
+	_ok(deitado < 0.55,
+		"a cabeça tem de ir ao chão (de %.2f m para %.2f m)" % [em_pe, deitado])
+	_ok(deitado > 0.02, "e não pode atravessar a lona (%.2f m)" % deitado)
 
 	# E A POSE NÃO PODE SE ACUMULAR.
 	#
@@ -238,42 +316,84 @@ func _test_o_nocaute_derruba_de_verdade() -> void:
 	# Com a versão que acumulava, isto gira mais de mil graus.
 	l.queda = 1.0
 	l._aplicar_queda()
-	var uma_vez := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
+	var uma_vez := _altura(corpo, cabeca)
 	for i in range(200):
 		l.queda = 1.0
 		l._aplicar_queda()
-	var duzentas := l._esqueleto.get_bone_pose_rotation(l._osso_raiz)
-	_perto(rad_to_deg(uma_vez.angle_to(duzentas)), 0.0, 0.01,
+	_perto(_altura(corpo, cabeca), uma_vez, 0.001,
 		"a pose da queda tem de ser absoluta, e não somar a cada chamada")
 	l.free()
+
+## A altura de uma peça acima da lona, somando as juntas até a raiz — o
+## `global_position` não serve, porque o corpo de teste não está na
+## árvore da cena.
+func _altura(raiz: Node3D, no: Node3D) -> float:
+	var t := Transform3D.IDENTITY
+	var atual := no
+	while atual != null and atual != raiz:
+		t = atual.transform * t
+		atual = atual.get_parent() as Node3D
+	return (raiz.transform * t).origin.y
 
 func _test_o_nocaute_nao_afunda_o_lutador() -> void:
 	var l := _lutador()
 	var reacao := l.bater(1.0, true)
 	_ok(bool(reacao["nocaute"]), "um nível que derruba tem de derrubar no primeiro soco")
-	# Dois segundos de queda, no ritmo do jogo.
-	for i in range(120):
-		l.atualizar(1.0 / 60.0)
+	_correr(l, 130)
 	_ok(l.queda > 0.9, "depois de dois segundos ele tem de estar na lona")
 	var corpo := l.get_child(0) as Node3D
 	# ESTA É A LINHA QUE O ERRO ORIGINAL QUEBRAVA. O corpo caído tem de
-	# continuar POR CIMA da lona (y ≈ 0) e dentro do enquadramento da
-	# câmera — não debaixo do ringue, que foi onde ele foi parar.
-	_ok(corpo.position.y > -0.10, "o lutador caído não pode afundar na lona (y=%.2f)" % corpo.position.y)
-	_ok(absf(corpo.position.x) < 1.0, "o lutador caído não pode sair de lado do quadro")
-	_ok(corpo.position.z > -1.0, "o lutador caído não pode ir para trás das cordas")
+	# continuar POR CIMA da lona e dentro do enquadramento da câmera — não
+	# debaixo do ringue, que foi onde ele foi parar.
+	for nome in ["Cabeca", "Quadril", "Luva_E", "Luva_D"]:
+		var peca := corpo.find_child(str(nome), true, false) as Node3D
+		if peca == null:
+			continue
+		var onde := _onde(corpo, peca)
+		_ok(onde.y > -0.10, "%s não pode afundar na lona (y=%.2f)" % [nome, onde.y])
+		_ok(absf(onde.x) < 1.2, "%s não pode sair de lado do quadro (x=%.2f)" % [nome, onde.x])
+		_ok(onde.z > -1.6, "%s não pode ir para trás das cordas (z=%.2f)" % [nome, onde.z])
 	l.free()
+
+func _onde(raiz: Node3D, no: Node3D) -> Vector3:
+	var t := Transform3D.IDENTITY
+	var atual := no
+	while atual != null and atual != raiz:
+		t = atual.transform * t
+		atual = atual.get_parent() as Node3D
+	return (raiz.transform * t).origin
 
 func _test_levantar_devolve_o_lutador_para_cima_da_lona() -> void:
 	var l := _lutador()
+	var corpo := l.get_child(0) as Node3D
+	var cabeca := corpo.find_child("Cabeca", true, false) as Node3D
+	var em_pe := _altura(corpo, cabeca)
 	l.bater(1.0, true)
 	# Queda, contagem e volta: seis segundos cobrem o ciclo inteiro.
-	for i in range(360):
-		l.atualizar(1.0 / 60.0)
+	_correr(l, 400)
 	_ok(l.queda <= 0.001, "ele tem de levantar sozinho para o próximo soco")
 	_ok(l.dano < 1.0, "quem levanta volta com fôlego para levar o segundo soco")
+	_perto(_altura(corpo, cabeca), em_pe, 0.06, "de pé, a cabeça volta à altura de antes")
+	l.free()
+
+## E A RODADA SEGUINTE COMEÇA COM O CORPO INTEIRO NO LUGAR.
+##
+## Uma rodada pode ACABAR com o adversário no chão, e as faixas de
+## `knockout` deixam joelho e cotovelo dobrados na última pose. O clipe
+## `idle` não tem faixa de perna nenhuma: sem devolver a pose de
+## nascimento, o jogador seguinte encontraria um lutador de pé com as
+## pernas ainda dobradas do tombo anterior — e assim a noite inteira.
+func _test_preparar_desfaz_a_pose_do_tombo() -> void:
+	var l := _lutador()
 	var corpo := l.get_child(0) as Node3D
-	_perto(corpo.rotation.x, 0.0, 0.02, "de pé, o corpo volta ao prumo")
+	var joelho := corpo.find_child("Canela_D", true, false) as Node3D
+	var antes := joelho.rotation
+	l.bater(1.0, true)
+	_correr(l, 80)
+	_ok(joelho.rotation.distance_to(antes) > 0.2, "o tombo tem de dobrar o joelho")
+	l.preparar()
+	_perto(joelho.rotation.distance_to(antes), 0.0, 0.001,
+		"a rodada seguinte começa com o corpo no lugar")
 	l.free()
 
 # ------------------------------------------------------------- frases

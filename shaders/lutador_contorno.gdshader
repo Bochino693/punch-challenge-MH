@@ -26,11 +26,20 @@ render_mode unshaded, cull_front, depth_draw_opaque, shadows_disabled;
 
 // Em metros. O lutador tem cerca de 1,8 m, então um centímetro e meio é
 // um traço grosso de desenho sem virar uma mancha.
-uniform float espessura = 0.016;
+uniform float espessura = 0.013;
 uniform vec4 cor : source_color = vec4(0.05, 0.02, 0.06, 1.0);
 
+// O CONTORNO É PARA A SILHUETA, NÃO PARA O DETALHE.
+//
+// Depois que as peças de um membro passaram a ser costuradas numa malha
+// só (ver `Figura.fundir`), não existe mais "peça" para deixar de fora
+// do contorno — e sem essa distinção a casca do olho, do nariz e da boca
+// escapava por fora da pele e riscava a cara de preto. Quem diz agora é
+// cada VÉRTICE, na primeira coordenada de textura: 1 para a pele, o
+// cabelo e os espetos, que são silhueta; 0 para o que mora dentro da
+// cara, que já está contornado pela sombra em volta.
 void vertex() {
-	VERTEX += normalize(NORMAL) * espessura;
+	VERTEX += normalize(NORMAL) * espessura * UV.x;
 }
 
 void fragment() {

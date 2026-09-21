@@ -145,13 +145,32 @@ func _chave(porta: String) -> String:
 		return porta
 	return "%s%08d" % [porta.replace(digitos, ""), int(digitos)]
 
+## QUANTO A LEITURA ESPERA POR UM BYTE, EM MILISSEGUNDOS.
+##
+## ERA CEM, E CEM CUSTAVA O JOGO INTEIRO. A extensão lê numa thread
+## própria, mas `poll_events` precisa da mesma tranca que essa thread
+## segura enquanto está parada esperando o próximo byte. Com uma porta
+## ABERTA E CALADA — o caso mais comum de todos: uma COM de Bluetooth,
+## um leitor de cartão, ou o Arduino nos primeiros segundos antes do
+## READY — o laço do jogo passava a esperar junto. Medido, o quadro ia a
+## 95 ms com a porta aberta, e a máquina rodava a 10 quadros por segundo
+## enquanto "procurava o Arduino".
+##
+## Oito milissegundos é meio quadro no pior caso e continua folgado para
+## o protocolo: a 115.200 bauds, a linha mais longa que a placa manda
+## atravessa o cabo em cerca de um milissegundo. A thread volta a
+## bloquear logo em seguida; o que mudou é que ela solta a tranca oito
+## vezes mais vezes por segundo.
+const ESPERA_DA_LEITURA_MS := 8
+
 func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 	if _mgr == null or port.is_empty():
 		return false
 	if is_open():
 		close_port()
-	# timeout 100 ms; modo 1 = MODE_LINE_BUFFERED (uma linha por evento).
-	if _mgr.open(port, baud, 100, 1):
+	# Modo 1 = MODE_LINE_BUFFERED: cada evento é uma linha terminada em
+	# \n, que é exatamente o formato do nosso protocolo.
+	if _mgr.open(port, baud, ESPERA_DA_LEITURA_MS, 1):
 		_port = port
 		opened.emit(_port)
 		return true

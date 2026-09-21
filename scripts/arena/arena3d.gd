@@ -371,18 +371,22 @@ func _montar_particulas_de_impacto() -> void:
 	_mundo.add_child(_poeira_particulas)
 
 # ------------------------------------------------------------- o lutador
-## Põe o lutador na lona. `cena` é o GLB já carregado; sem ele a arena
-## continua funcionando (ringue vazio) em vez de derrubar o jogo.
-func instalar(cena: PackedScene) -> bool:
-	if cena == null:
-		return false
-	var corpo := cena.instantiate()
-	if not (corpo is Node3D):
-		return false
+## PÕE O LUTADOR NA LONA — CONSTRUÍDO AQUI, E NÃO CARREGADO DE UM ARQUIVO.
+##
+## Antes isto recebia um `PackedScene` vindo de `lutador.glb`, que por sua
+## vez era gerado por um script em Python. Três coisas melhoraram ao
+## mesmo tempo quando o corpo virou código (ver `LutadorNativo`): sumiu a
+## dependência de Python, sumiu a chance de a máquina chegar ao salão sem
+## o modelo dentro, e sumiu o ciclo de ajuste que passava pelo Blender.
+##
+## Não há mais o caso "o arquivo não estava lá": o lutador existe sempre
+## que o jogo existe.
+func instalar() -> bool:
+	var corpo := LutadorNativo.montar()
 	lutador = Lutador3D.new()
 	lutador.name = "Lutador"
 	_mundo.add_child(lutador)
-	lutador.montar(corpo as Node3D)
+	lutador.montar(corpo)
 	_pintar_de_desenho(corpo)
 	return true
 
@@ -424,6 +428,18 @@ func _pintar_de_desenho(corpo: Node3D) -> void:
 			var antigo := malha.get_active_material(s)
 			if antigo is BaseMaterial3D:
 				cor = (antigo as BaseMaterial3D).albedo_color
+			# O CORPO NATIVO NÃO CARREGA MATERIAL NENHUM: cada peça declara a
+			# sua cor num metadado e a pintura acontece só aqui. É uma malha
+			# crua a menos por peça para a TV Box guardar, e é o que deixa a
+			# paleta do personagem numa página só (`LutadorNativo`).
+			if malha.has_meta("cor"):
+				cor = malha.get_meta("cor")
+			# As peças que o próprio controlador criou (a boca) não vieram
+			# do GLB e não têm material de origem: elas dizem a sua cor.
+			if lutador != null:
+				var declarada = lutador.cor_da_peca(malha)
+				if declarada != null:
+					cor = declarada
 			var tinta := ShaderMaterial.new()
 			tinta.shader = TOON
 			tinta.set_shader_parameter("cor_base", cor)
@@ -432,8 +448,19 @@ func _pintar_de_desenho(corpo: Node3D) -> void:
 			# O CONTORNO ACOMPANHA A COR DA PEÇA, bem escurecido. Um preto
 			# só, igual para tudo, achata a figura; um traço que puxa para
 			# a cor do que está contornando é o que ilustrador faz.
-			traco.set_shader_parameter("cor", cor.darkened(0.86))
-			tinta.next_pass = traco
+			traco.set_shader_parameter("cor", malha.get_meta("cor_traco", cor.darkened(0.86)))
+			# O CONTORNO É PARA A SILHUETA, NÃO PARA O DETALHE.
+			#
+			# A casca invertida empurra cada vértice 1,6 cm para fora. Numa
+			# peça de 2 cm — a boca, o lábio — isso é a peça inteira: a
+			# casca fica maior que o original, aparece por fora dele e o
+			# rosto ganha riscos pretos soltos em volta. Peça pequena
+			# dispensa contorno; ela já está contornada pela sombra da
+			# cara em volta.
+			var caixa_da_peca := geometria.get_aabb().size
+			var menor := minf(caixa_da_peca.x, minf(caixa_da_peca.y, caixa_da_peca.z))
+			if menor > 0.06:
+				tinta.next_pass = traco
 			malha.set_surface_override_material(s, tinta)
 			_peles.append(tinta)
 
@@ -446,7 +473,7 @@ func _malhas(no: Node) -> Array[MeshInstance3D]:
 	return achadas
 
 func modelo_avancado() -> bool:
-	return lutador != null and lutador.tem_esqueleto()
+	return lutador != null and lutador.completo()
 
 # ---------------------------------------------------------------- ritmo
 func ligar(ativa: bool) -> void:

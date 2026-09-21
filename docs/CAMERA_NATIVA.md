@@ -24,12 +24,27 @@ feed ativo; ele não reinicia a câmera por atraso ou por foto.
 - Somente o retrato escolhido fica congelado brevemente. O feed ao vivo não é
   fechado e a gravação JPEG do ranking ocorre fora da linha principal.
 
-## Diagnóstico PowerShell
+## Diagnóstico
 
-`tools/camera_windows.ps1` apenas consulta os dispositivos PnP, a privacidade
-da webcam e programas que podem estar usando a câmera. **RESOLVER ACESSO**
-altera somente as permissões de câmera do usuário atual. O PowerShell não
-transporta vídeo e não abre a webcam.
+`scripts/camera_doctor.gd` separa os quatro casos possíveis, em ordem:
+
+1. **falta a extensão nativa ao lado do jogo** — a primeira pergunta,
+   porque sem ela todo o resto é irrelevante;
+2. **o Windows também não vê a câmera** — cabo, porta USB ou driver;
+3. **a privacidade está fechada** para aplicativos de área de trabalho;
+4. **outro programa está com a câmera aberta** — só um por vez pode.
+
+Ele pergunta isso ao `reg.exe`, ao `tasklist.exe` e ao `pnputil.exe`, que
+já estão em qualquer Windows. Nada abre o fluxo de vídeo e nada disputa a
+webcam com o jogo. **RESOLVER ACESSO** grava, no ramo do usuário, o mesmo
+valor que o aplicativo Configurações grava quando alguém move o
+interruptor à mão — não pede elevação e é reversível pelo mesmo caminho.
+
+Antes isto era um `.ps1` que o jogo precisava desembrulhar do pacote para
+o AppData e executar com `-ExecutionPolicy Bypass`. Era um arquivo a mais
+para o antivírus examinar, uma política a mais para uma máquina
+corporativa barrar — justamente na tela em que o operador foi pedir
+socorro — e quase um segundo só para o PowerShell subir.
 
 ## Exportação
 

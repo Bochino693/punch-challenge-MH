@@ -90,6 +90,7 @@ func run() -> void:
 	_test_timeout_devolve_credito()
 	_test_quatro_digitos()
 	_test_medico_da_camera()
+	_test_a_camera_diz_quando_falta_a_extensao()
 	_test_captura_nativa_sem_ponte()
 	_test_diagnostico_nao_interrompe_video()
 	_test_camera_acesa_nao_apaga()
@@ -282,6 +283,34 @@ func _test_quatro_digitos() -> void:
 ## Um relatório que exige o técnico repetir à mão o que a máquina acabou
 ## de descobrir é meio relatório: achou câmera no índice 2, a máquina
 ## passa a usar o índice 2 sozinha.
+func _test_a_camera_diz_quando_falta_a_extensao() -> void:
+	"""No Windows o Godot NAO TEM camera propria.
+
+	`CameraServer` so e implementado em Linux, macOS, Android e iOS. No
+	Windows `feeds()` devolve lista vazia para sempre, haja webcam ou nao
+	-- entao a camera do jogo depende inteiramente da extensao nativa.
+
+	Quando a DLL fica para tras (copiaram so o .exe, falta o VC++, maquina
+	ARM), a tela dizia "CONECTE UMA CAMERA USB". Isso e uma acusacao falsa:
+	manda procurar hardware quando o problema e um arquivo, e foi por isso
+	que "nao funciona em outras maquinas, mesmo notebook com camera" ficou
+	sem resposta. A mensagem tem de apontar o arquivo.
+	"""
+	var servico: CameraService = jogo.camera_service
+	assert(servico != null)
+	# A pergunta existe e responde sem depender de plataforma.
+	assert(servico.has_method("extensao_nativa_presente"))
+	var presente: bool = servico.extensao_nativa_presente()
+	assert(presente == ClassDB.class_exists(&"CameraServerExtension"))
+
+	# E o diagnostico so acusa a falta onde ela realmente impede tudo.
+	var motivo: String = servico._diagnostico_da_plataforma()
+	if OS.get_name() == "Windows" and not presente:
+		assert(not motivo.is_empty())
+		assert("DLL" in motivo)
+	else:
+		assert(motivo.is_empty())
+
 func _test_medico_da_camera() -> void:
 	assert(jogo.medico != null)
 	assert(not jogo.medico.rodando)

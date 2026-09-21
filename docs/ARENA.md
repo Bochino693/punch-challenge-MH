@@ -44,47 +44,63 @@ chega esticada) e os testes.
 
 | arquivo | o que faz |
 |---|---|
-| `tools/gerar_personagem_blender.py` | gera o humanoide rigado, materiais e nove ações |
-| `tools/gerar_personagem_glb.py` | gera o lutador articulado leve, também com nove ações |
-| `GERAR_PERSONAGEM.bat` | atalho de dois cliques para o gerador Blender no Windows |
-| `tools/gerar_personagem_windows.ps1` | encontra o Blender e executa o gerador no Windows |
-| `assets/personagem/lutador.glb` | modelo carregado pelo jogo |
+| `scripts/arena/figura.gd` | as formas torneadas, e a fusão das peças paradas |
+| `scripts/arena/lutador_nativo.gd` | monta o corpo: proporções, rosto, cores |
+| `scripts/arena/lutador_animacao.gd` | as nove ações, em tabelas de ângulos |
 | `scripts/arena/arena3d.gd` | o mundo 3D dentro do `SubViewport` |
-| `scripts/arena/lutador.gd` | integra AnimationPlayer, com ou sem Skeleton3D/skin |
+| `scripts/arena/lutador.gd` | conduz o tocador: reação, dano, queda, volta |
 | `scripts/arena/quadro.gd` | a moldura e as colunas de dano, em 2D |
 | `scripts/arena/frases.gd` | o que a máquina grita a cada nível |
 | `scripts/ranking_celebration.gd` | quatro cerimônias, conforme a colocação |
-| `tools/gerar_audio_arena.py` | o baque no corpo, a queda e a plateia |
 | `tests/test_arena.gd` | o que não pode voltar a quebrar |
 
-## Trocar o lutador
+## Como o corpo é feito
 
-O boneco é um `.glb` comum. Para pôr outro no lugar, basta substituir
-`assets/personagem/lutador.glb`. O contrato recomendado é `Skeleton3D`,
-mesh com skin e `AnimationPlayer`. O controlador reconhece nomes com
-prefixos de exportadores e procura: `idle`, `guard`, `taunt_weak`,
-`hit_light`, `hit_medium`, `hit_heavy`, `stagger`, `knockout` e `get_up`.
-Um fallback de transformação da raiz mantém um GLB externo incompleto
-visível, mas não substitui o contrato rigado.
+Cada membro é uma sequência de **anéis** de raios diferentes, empilhados
+ao longo de um eixo e costurados — um torno. A anatomia inteira vira uma
+tabela de raios, que é uma coisa que dá para ajustar e comparar, ao
+contrário de vértices soltos: um bíceps é um raio maior no meio do
+caminho, um antebraço de boxeador é 0,059 m no cotovelo e 0,036 m no
+punho.
 
-E se o arquivo **não existir**, a arena vira um ringue vazio iluminado e
-o jogo segue inteiro — placar, ranking, foto, tudo. Um gabinete no salão
-não tem quem conserte às onze da noite.
+A normal de cada vértice sai da **inclinação do perfil** naquele ponto,
+calculada analiticamente e não pela média dos triângulos vizinhos. É o
+que dá superfície contínua de verdade, sem costura e sem faceta — e é a
+diferença entre isto e a versão de caixas empilhadas, que nenhuma
+iluminação tirava do aspecto de Minecraft.
 
-Para gerar o humanoide no Windows, a partir da raiz do projeto:
+As medidas que definem o personagem:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\gerar_personagem_windows.ps1
-```
+| medida | valor |
+|---|---|
+| altura total | ~1,80 m |
+| ombro a ombro | 0,55 m |
+| cintura | 0,20 m |
+| cabeça | 0,24 m (≈ 7,5 cabeças de altura) |
+| luva | 0,066 m de raio, contra um punho de 0,046 m |
 
-O resultado tem uma malha skinned, 24 ossos, guarda anatômica como pose
-de repouso, bíceps e antebraços com volume, olhos completos, sobrancelhas,
-boca, lábio e protetor bucal, cabelo em mechas, materiais PBR cartoon,
-luvas vermelhas, shorts preto/vermelho/branco e nove ações.
-O arquivo anterior fica em `lutador.glb.anterior` até a validação local.
-Na **Central Técnica → Operação**, o indicador `HUMANOIDE BLENDER`
-confirma que o jogo carregou de fato a versão rigada; `MODELO LEVE ATIVO`
-significa que ainda está usando o GLB de segurança incluído no ZIP.
+O V do tronco sai da razão ombro/cintura. Uma versão anterior tinha 0,50
+contra 0,38 — um e pouco para um é a proporção de um barril, e foi o que
+manteve a queixa de "parece um gordinho" mesmo depois de trocar a
+iluminação. `tests/test_arena.gd` guarda estas razões.
+
+## Onze chamadas de desenho, e não sessenta e três
+
+O corpo tem sessenta e três peças, mas só **onze** se mexem sozinhas —
+as que as animações citam. Todo o resto (olhos, cabelo, luvas, botas,
+faixas do calção) é costurado dentro da junta que o carrega, na
+montagem, com a cor viajando **no vértice**.
+
+Isso importa porque o gargalo de uma TV Box não é triângulo, é chamada
+de desenho: dezessete mil triângulos qualquer GPU deste século desenha
+sem suar, mas sessenta e três chamadas — cento e vinte e seis com a
+passada do contorno — é trabalho de processador, e aparece como engasgo,
+não como queda suave de quadros.
+
+A passada do contorno é uma casca invertida, e ela só vale para a
+silhueta: cada vértice leva, na primeira coordenada de textura, se a peça
+dele entra na casca. Sem isso a casca do olho ficava maior que o olho,
+escapava por fora da pele e riscava a cara de preto.
 
 ## Premiação e torcida
 

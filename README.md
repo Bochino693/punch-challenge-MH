@@ -17,31 +17,35 @@ Central Técnica — com **uma** diferença, na tela do soco:
 > à lona quando não aguenta mais, e tem o estado mostrado nas **colunas
 > de dano** das laterais. A cada soco a máquina grita uma frase.
 
-O lutador é um arquivo `.glb` de verdade (abre no Blender, troca sem
-programar). Como ele é feito, como trocá-lo, quanto custa numa TV Box e o
-que os testes guardam: **[`docs/ARENA.md`](docs/ARENA.md)**.
+O lutador **não é um arquivo**: ele é construído pelo próprio jogo, em
+GDScript, quando a arena sobe. Como ele é feito, quanto custa numa TV Box
+e o que os testes guardam: **[`docs/ARENA.md`](docs/ARENA.md)**.
 
-## Gerar e testar o humanoide no Windows
+## O lutador não depende de nada para existir
 
-O ZIP já inclui o lutador leve com as nove animações. Para recriar a
-versão humanoide de alta definição, instale Blender 4.2 ou superior e dê
-dois cliques em `GERAR_PERSONAGEM.bat`. O equivalente no terminal é:
+Até a versão anterior o boneco era um `.glb` gerado por um script em
+Python, com um caminho alternativo que passava pelo Blender. Isso custava
+três coisas ao mesmo tempo:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\gerar_personagem_windows.ps1
-powershell -ExecutionPolicy Bypass -File .\tools\testar_melhorias_windows.ps1 -PularGeracaoGLB
-```
+* uma **dependência de linguagem** para quem quisesse mexer no
+  personagem — e uma máquina de salão não pode depender de ninguém ter
+  Python ou Blender instalado;
+* um **arquivo que podia faltar**. `embed_pck` faz o `.exe` parecer
+  autossuficiente, e um gabinete entregue sem o modelo dentro mostrava
+  um ringue vazio;
+* um **ciclo de ajuste que saía do Godot**. Cada milímetro de proporção
+  era uma viagem de ida e volta pelo Blender, e foi por isso que o
+  personagem demorou tanto a ficar bom.
 
-O primeiro comando cria `assets/personagem/lutador.glb` com uma malha
-skinned, 24 ossos e nove animações. O segundo reimporta o GLB, roda os
-testes e abre o editor para inspeção. Executáveis fora das pastas padrão
-podem ser informados pelos parâmetros `-Blender` e `-Godot`.
+Hoje o corpo é código: `scripts/arena/figura.gd` fabrica as formas
+torneadas e `scripts/arena/lutador_nativo.gd` as monta com as proporções
+do personagem. As nove ações também: `scripts/arena/lutador_animacao.gd`
+é a tabela de ângulos de cada gesto, montada em faixas de animação na
+hora. Mudar o V do tronco, a altura da guarda ou a força de um soco
+levado é mudar um número e rodar o jogo.
 
-Depois da geração, abra **Central Técnica → Operação**. O quadro do
-personagem deve mostrar **HUMANOIDE BLENDER • TEXTURA CARTOON**. Se
-mostrar **MODELO LEVE ATIVO**, o GLB novo ainda não foi reimportado; feche
-e reabra o Godot. O gerador tenta fazer essa importação automaticamente
-quando encontra o executável do editor na pasta Downloads.
+Em **Central Técnica → Operação**, o quadro do personagem mostra
+**LUTADOR NATIVO • NOVE AÇÕES**.
 
 O repositório original continua sendo a versão de referência: correção de
 sensor, de câmera ou de ranking deve entrar nos dois, e o código fora de
@@ -539,16 +543,74 @@ Windows recusa a extensão em silêncio — é a causa número um de
 "funciona no meu PC e não no outro". Confira com `where VCRUNTIME140.dll`
 num terminal da máquina; nada listado quer dizer que falta.
 
-## Refazer o ícone do aplicativo
+## De que este jogo depende
+
+A resposta curta: para JOGAR, de nada além do próprio executável, da
+pasta que o acompanha e do Windows. Não há linguagem para instalar, nem
+interpretador, nem biblioteca de cálculo. A tabela é a resposta longa.
+
+| o que | onde entra | é preciso instalar? |
+|---|---|---|
+| **Godot 4.6** | o motor; vira o `.exe` na exportação | não — vai embutido |
+| **`gdserial.dll`** | abre a porta COM do Arduino | não — sai na exportação, **ao lado** do `.exe` |
+| **`libcameraserver-extension.windows.dll`** | a webcam, por Media Foundation | não — idem |
+| **Visual C++ 2015-2022 Redistributable (x64)** | as duas DLLs acima dependem dele | **sim, uma vez por máquina** |
+| `reg.exe`, `tasklist.exe`, `pnputil.exe` | diagnóstico da câmera (F9) | não — são do Windows |
+| `powershell.exe` | **só** o plano B da serial, quando a DLL não carrega | não — é do Windows |
+
+**As duas DLLs são o ponto frágil, e sempre pelo mesmo motivo.** O
+`embed_pck` faz o `.exe` parecer autossuficiente, então é natural copiar
+só ele — e aí o Arduino e a câmera somem sem nenhuma mensagem de erro.
+Copie a pasta inteira.
+
+**O PowerShell fica, de propósito.** Ele não é uma dependência no sentido
+que incomoda: já vem no Windows, não se instala, não se atualiza. E ele é
+o plano B da porta serial — quando a `gdserial.dll` não carrega (e no
+gabinete do operador ela NÃO carregou), é o que mantém START, CRÉDITO e o
+sensor vivos em vez de deixar a máquina inteira em "SIMULAÇÃO". Tirá-lo
+seria trocar uma dependência que não custa nada por uma máquina morta na
+noite em que a DLL falhar.
+
+**O que saiu.** Python (o lutador, o banco de áudio inteiro e o ícone),
+NumPy, Blender, o `lutador.glb` e o `camera_windows.ps1` do diagnóstico
+da câmera. Resta um único uso de Python no repositório —
+`tools/conferir_ponte.sh`, um teste de desenvolvimento que roda só em
+Linux e usa Python para abrir um par de pseudo-terminais. Ele não vai
+para a exportação e o jogo nunca o chama; existe porque é o único teste
+que põe o `ponte_serial.ps1` de verdade para conversar com uma porta
+serial de verdade.
+
+## Refazer o som e o ícone
+
+Nada disso é preciso para JOGAR — os arquivos viajam prontos no
+repositório. É preciso para MUDAR um som ou o ícone, e é aqui que estava
+a última dependência de linguagem do projeto: o banco de áudio inteiro e
+o ícone eram sintetizados por scripts em Python, dois deles exigindo
+NumPy. Hoje é o próprio Godot que faz as duas coisas:
 
 ```
-python3 tools/gerar_icone.py
+godot --headless --path . --script tools/gerar_audio.gd
+godot --headless --path . --script tools/gerar_icone.gd
 ```
 
-Redesenha `assets/icon.png` (512 × 512) a partir da mesma silhueta de
-luva que `scripts/icones.gd` usa no jogo — a luva da barra de tarefas e
-a luva do cartão de PARTIDAS são reconhecidamente a mesma coisa. Só
-depende do Python padrão; não há dependência de imagem para instalar.
+O primeiro reescreve os 37 arquivos de `assets/audio/arcade/` em cerca
+de vinte segundos: efeitos, os oito níveis, avisos de operação, os dois
+loops, a música da abertura e os sons da arena. Para conferir um banco
+novo contra o que já está no repositório sem sobrescrevê-lo:
+
+```
+godot --headless --path . --script tools/gerar_audio.gd -- /tmp/audio_novo
+godot --headless --path . --script tools/conferir_audio.gd -- /tmp/audio_novo
+```
+
+A conferência compara duração, pico, volume percebido e a energia em três
+faixas — e não amostra por amostra, porque metade de cada som é ruído e
+ruído branco não tem forma, só estatística.
+
+O segundo redesenha `assets/icon.png` (512 × 512) a partir da mesma
+silhueta de luva que `scripts/icones.gd` usa no jogo — a luva da barra de
+tarefas e a luva do cartão de PARTIDAS são reconhecidamente a mesma
+coisa.
 
 ## Documentação
 

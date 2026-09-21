@@ -101,8 +101,8 @@ const PASSOS := {
 	# da régua que ela é.
 	"referencia": Rect2(110, 526, 400, 58),
 	"curva": Rect2(570, 526, 400, 58),
-	"porta": Rect2(110, 1424, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1538, 400, LADO_BOTAO),
+	"porta": Rect2(110, 1470, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1586, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
@@ -121,15 +121,15 @@ const BOTOES_SIMPLES := {
 	# jeito certo de calibrar do zero, mas não é o que se quer com a fila
 	# esperando e a máquina pagando mil pontos para todo mundo: aí se quer
 	# bater UMA vez e dizer "este é o máximo". É isso, e é imediato.
-	"usar_min": Rect2(110, 672, 275, 56),
-	"usar_ref": Rect2(402, 672, 276, 56),
-	"usar_max": Rect2(695, 672, 275, 56),
-	"auto_escala": Rect2(110, 842, 400, 60),
-	"esquecer_escala": Rect2(570, 842, 400, 60),
-	"calibrar": Rect2(300, 1258, 480, 56),
-	"eixo": Rect2(620, 1424, 280, LADO_BOTAO),
-	"enviar_config": Rect2(110, 1730, 400, 56),
-	"testar": Rect2(570, 1730, 400, 56),
+	"usar_min": Rect2(110, 708, 275, 56),
+	"usar_ref": Rect2(402, 708, 276, 56),
+	"usar_max": Rect2(695, 708, 275, 56),
+	"auto_escala": Rect2(110, 876, 400, 60),
+	"esquecer_escala": Rect2(570, 876, 400, 60),
+	"calibrar": Rect2(300, 1302, 480, 56),
+	"eixo": Rect2(620, 1470, 280, LADO_BOTAO),
+	"enviar_config": Rect2(110, 1782, 400, 56),
+	"testar": Rect2(570, 1782, 400, 56),
 	# --- página CÂMERA
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
@@ -453,6 +453,57 @@ var serial_status := "INICIANDO"
 var porta_atual := ""
 var ultimo_sinal_ms := -1
 var proxima_tentativa := 0.0
+
+## ------------------------------------------------------------------
+## A BUSCA PELO ARDUINO NÃO PODE ENGASGAR O JOGO.
+##
+## MEDIDO: `_tentar_conectar` custa 26 ms — 6 ms para enumerar as portas
+## e 20 ms para o sistema recusar uma que não existe. Enquanto a placa
+## não responde, isso se repete a cada 0,15 a 1,5 segundo, no MEIO do
+## laço do jogo. Com o quadro inteiro tendo 16,7 ms de orçamento, cada
+## tentativa é um quadro perdido, e o pior caso medido foi de 124 ms —
+## sete quadros seguidos parados.
+##
+## Rodando o jogo sem nenhuma tentativa, o quadro fica em 6,9 ms do
+## primeiro ao último, com p95 de 7,1. Com elas, a mediana sobe para 9,1
+## e o p95 para 33,5. Era a maior fonte de engasgo do jogo — e a que
+## nenhum teste pegava, porque só aparece na máquina em que o Arduino
+## ainda não respondeu: ou seja, em toda máquina, nos primeiros segundos,
+## e a noite inteira naquela em que o cabo está solto.
+##
+## Duas medidas, e nenhuma delas desiste de reconectar:
+
+## 1) A LISTA DE PORTAS SAI DO LAÇO DO JOGO.
+##
+##    Enumerar as seriais do sistema custa 5 ms no caso comum e, medido,
+##    105 ms em duas de cada doze vezes — o sistema operacional às vezes
+##    para para conversar com um driver (no Windows, tipicamente uma
+##    porta Bluetooth). Cento e cinco milissegundos é SEIS QUADROS
+##    perdidos de uma vez, e nenhuma quantidade de cache resolve um
+##    engasgo desse tamanho: só tira dele a frequência.
+##
+##    Então a enumeração acontece numa thread, e o laço do jogo usa
+##    sempre a última lista conhecida. A busca continua tão agressiva
+##    quanto era; o que mudou é quem espera por ela.
+##
+##    E AS CHAMADAS AO `link` NUNCA SE CRUZAM. Enquanto a thread está
+##    enumerando, o laço principal não tenta abrir porta nenhuma — em vez
+##    de trancar (o que devolveria a espera ao jogo), ele simplesmente
+##    deixa esta volta passar. A próxima vem em um décimo de segundo.
+const ESPERA_DA_LISTA := 2.0
+var _lista_pedida_em := -99.0
+var _thread_portas: Thread = null
+var _portas_do_fundo := PackedStringArray()
+var _mutex_portas := Mutex.new()
+var _lista_ja_veio := false
+
+## 2) DURANTE O SOCO, A BUSCA ESPERA. Quando a porta não está aberta, o
+##    golpe não vai ser lido de qualquer jeito — reconectar meio segundo
+##    depois não muda nada para quem joga, e não travar a tela no meio do
+##    golpe muda tudo. A espera tem teto: se uma rodada atrás da outra
+##    segurasse a busca para sempre, a máquina nunca mais acharia a placa.
+const TETO_DA_ESPERA_DO_SOCO := 4.0
+var _busca_adiada_desde := -1.0
 var proximo_ping := 0.0
 ## Última telemetria, exibida na Central Técnica.
 var telemetria := ""
@@ -706,30 +757,25 @@ func _ready() -> void:
 
 ## PÕE O LUTADOR NA ARENA.
 ##
-## O GLB é carregado UMA VEZ, no arranque, e nunca no meio de uma rodada:
-## carregar malha durante o jogo é engasgo garantido, e é justamente no
-## primeiro soco que ele apareceria.
+## O CORPO É CONSTRUÍDO UMA VEZ, no arranque, e nunca no meio de uma
+## rodada: montar malha durante o jogo é engasgo garantido, e é
+## justamente no primeiro soco que ele apareceria.
 ##
-## FALTAR O ARQUIVO NÃO PODE DERRUBAR A MÁQUINA. Um gabinete no salão não
-## tem quem conserte às onze da noite: sem o `.glb`, a arena fica sendo um
-## ringue vazio com as luzes acesas e o jogo segue inteiro — placar,
-## ranking, foto, tudo. É pior do que com o lutador, e é infinitamente
-## melhor do que uma tela preta.
+## E NÃO HÁ MAIS ARQUIVO PARA FALTAR. Antes isto carregava um `.glb` que
+## um script em Python gerava, com todo o cuidado necessário para o caso
+## de a máquina chegar ao salão sem ele dentro. O lutador agora é código
+## (`LutadorNativo`): ele existe sempre que o jogo existe, e ajustar uma
+## proporção deixou de passar pelo Blender.
 func _montar_arena() -> void:
 	if arena == null:
 		return
 	arena.qualidade = desempenho.qualidade
-	var caminho := "res://assets/personagem/lutador.glb"
-	if not ResourceLoader.exists(caminho):
-		push_warning("Arena sem lutador: %s não existe" % caminho)
-		return
-	var cena := load(caminho)
-	if cena is PackedScene and arena.instalar(cena as PackedScene):
+	if arena.instalar():
 		arena.preparar()
 		if not arena.modelo_avancado():
-			push_warning("Personagem leve ativo. Execute GERAR_PERSONAGEM.bat e reabra o Godot para usar o humanoide Blender.")
+			push_warning("Arena: o lutador subiu sem todas as nove ações.")
 	else:
-		push_warning("Arena: %s não abriu como cena 3D" % caminho)
+		push_warning("Arena: o lutador não pôde ser montado.")
 
 ## A ARENA SÓ EXISTE NAS TELAS EM QUE APARECE.
 ##
@@ -747,6 +793,12 @@ func _arena_no_ar() -> bool:
 	return state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED, GameDef.State.MEASURING, GameDef.State.RESULT]
 
 func _exit_tree() -> void:
+	# A THREAD DA ENUMERAÇÃO FECHA PRIMEIRO, e antes de o `link` sumir:
+	# ela está falando com ele. Aqui — e só aqui — vale esperar, porque
+	# não há mais quadro para estragar.
+	if _thread_portas != null:
+		_thread_portas.wait_to_finish()
+		_thread_portas = null
 	if link != null:
 		link.close_port()
 		# A ponte por processo tem um ajudante do lado de fora: fechar a
@@ -2371,6 +2423,56 @@ func _portas_cegas() -> PackedStringArray:
 				cegas.append("/dev/ttyUSB%d" % i)
 	return cegas
 
+## DÁ PARA PROCURAR AGORA SEM ATRAPALHAR QUEM ESTÁ JOGANDO?
+##
+## Só não dá enquanto o golpe está no ar — do 3-2-1 até o veredito sair.
+## Ver o comentário de `TETO_DA_ESPERA_DO_SOCO`: a pausa é curta, tem
+## teto, e nunca vira desistência.
+## Manda a thread enumerar, se já passou o tempo e não há outra correndo.
+func _pedir_a_lista() -> void:
+	if _thread_portas != null or link == null or not link.available():
+		return
+	if animation_time - _lista_pedida_em < ESPERA_DA_LISTA:
+		return
+	_thread_portas = Thread.new()
+	# O `link` vai AMARRADO na chamada. Se o jogo trocar de caminho no
+	# meio da enumeração, a thread continua falando com o objeto que ela
+	# recebeu, e não com um que deixou de existir.
+	_thread_portas.start(_listar_no_fundo.bind(link))
+
+func _listar_no_fundo(alvo: SerialLink) -> void:
+	var achadas := alvo.list_ports()
+	_mutex_portas.lock()
+	_portas_do_fundo = achadas
+	_mutex_portas.unlock()
+
+## Recolhe o que a thread achou. Só quando ela já terminou: esperar aqui
+## seria devolver ao jogo exatamente a pausa que a thread existe para
+## tirar dele.
+func _recolher_a_lista() -> void:
+	if _thread_portas == null or _thread_portas.is_alive():
+		return
+	_thread_portas.wait_to_finish()
+	_thread_portas = null
+	_mutex_portas.lock()
+	portas_visiveis = _portas_do_fundo.duplicate()
+	_mutex_portas.unlock()
+	_lista_ja_veio = true
+	_lista_pedida_em = animation_time
+
+func _hora_de_procurar() -> bool:
+	var no_meio_do_golpe := state in [
+		GameDef.State.COUNTDOWN, GameDef.State.ARMED,
+		GameDef.State.MEASURING, GameDef.State.RESULT,
+	]
+	if not no_meio_do_golpe:
+		_busca_adiada_desde = -1.0
+		return true
+	if _busca_adiada_desde < 0.0:
+		_busca_adiada_desde = animation_time
+		return false
+	return animation_time - _busca_adiada_desde >= TETO_DA_ESPERA_DO_SOCO
+
 func _tentar_conectar() -> void:
 	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
 	#
@@ -2400,7 +2502,24 @@ func _tentar_conectar() -> void:
 		)
 		proxima_tentativa = animation_time + 1.0
 		return
-	portas_visiveis = link.list_ports()
+	# A PRIMEIRA LISTA É PEDIDA NA HORA, as seguintes no fundo. Na
+	# primeira o jogo ainda está subindo e não há quadro para estragar; e
+	# sem ela a fila nasceria vazia, o que ligaria a varredura cega antes
+	# de a máquina ter olhado para as portas que o sistema anuncia.
+	#
+	# E O QUE MARCA "JÁ VEIO" É UMA BANDEIRA, NÃO A LISTA ESTAR VAZIA.
+	# Numa máquina sem nenhuma serial ligada — que é o caso mais comum de
+	# todos, e justamente aquele em que a busca roda a noite inteira — a
+	# lista vazia É a resposta certa. Olhando para ela, o jogo concluía
+	# que a lista nunca tinha chegado e refazia a enumeração no laço
+	# principal a cada tentativa, que é exatamente o que esta thread veio
+	# evitar.
+	if not _lista_ja_veio:
+		portas_visiveis = link.list_ports()
+		_lista_pedida_em = animation_time
+		_lista_ja_veio = true
+	else:
+		_pedir_a_lista()
 	_fila_de_portas = _fila_de_tentativas()
 	if _fila_de_portas.is_empty():
 		# PROCURAR TEM DE PARECER PROCURAR. A frase era só
@@ -2531,7 +2650,8 @@ func _poll_serial(_delta: float) -> void:
 		# imediata em cima de uma porta que ninguém chegou a abrir.
 		return
 	if not link.is_open():
-		if animation_time >= proxima_tentativa:
+		_recolher_a_lista()
+		if _thread_portas == null and animation_time >= proxima_tentativa and _hora_de_procurar():
 			_tentar_conectar()
 		return
 	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
@@ -4982,15 +5102,15 @@ func _central_operacao() -> void:
 	_secao(Rect2(80, 920, 920, 225), "PERSONAGEM DA ARENA", Paleta.VERDE)
 	var avancado := arena != null and arena.modelo_avancado()
 	_texto(
-		"HUMANOIDE BLENDER • TEXTURA CARTOON" if avancado else "MODELO LEVE ATIVO",
+		"LUTADOR NATIVO • NOVE AÇÕES" if avancado else "LUTADOR INCOMPLETO",
 		1000.0, 24, Paleta.VERDE if avancado else Paleta.AMBAR
 	)
 	_texto(
-		"Pronto para o salão" if avancado else "Execute GERAR_PERSONAGEM.bat e reabra o Godot",
+		"Pronto para o salão" if avancado else "Alguma ação não subiu — veja o registro",
 		1045.0, 17, Paleta.CREME
 	)
 	_texto(
-		"Este indicador confirma qual arquivo foi realmente importado pelo jogo.",
+		"O corpo é construído pelo próprio jogo: não há arquivo de modelo para faltar.",
 		1086.0, 14, Paleta.TINTA_FRACA
 	)
 
@@ -5036,7 +5156,7 @@ func _central_golpe() -> void:
 	# faltava enquanto a dificuldade era um expoente adimensional numa
 	# caixa ao lado, que só dizia alguma coisa a quem já sabia a conta.
 	# Ver `ScoreCurve`.
-	_secao(Rect2(80, 350, 920, 420), "A RÉGUA DO SOCO", Paleta.CIANO)
+	_secao(Rect2(80, 350, 920, 452), "A RÉGUA DO SOCO", Paleta.CIANO)
 	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
 	_stepper(
@@ -5072,17 +5192,17 @@ func _central_golpe() -> void:
 	# descobrir por quê: a nota baixa parece dificuldade, não escala
 	# errada. Com o número em m/s ao lado da nota, uma batida responde a
 	# pergunta inteira — e os três botões abaixo consertam na mesma hora.
-	_leitura_do_ultimo_soco(630.0)
+	_leitura_do_ultimo_soco(666.0)
 	_botao(BOTOES_SIMPLES["usar_min"], "É O MÍNIMO", false, Paleta.CIANO, 17)
 	_botao(BOTOES_SIMPLES["usar_ref"], "É O SOCO MÉDIO", false, Paleta.AMBAR, 17)
 	_botao(BOTOES_SIMPLES["usar_max"], "É O MÁXIMO", false, Paleta.VERMELHO, 17)
 	_texto(
 		"bata uma vez e toque no que aquele soco deve valer — a régua se ajusta na hora",
-		752.0, 15, Paleta.TINTA_FRACA
+		790.0, 15, Paleta.TINTA_FRACA
 	)
 
 	# ------------------------------------------------- aprende sozinha
-	_secao(Rect2(80, 794, 920, 186), "A RÉGUA APRENDE SOZINHA", Paleta.VERDE)
+	_secao(Rect2(80, 826, 920, 190), "A RÉGUA APRENDE SOZINHA", Paleta.VERDE)
 	_botao(
 		BOTOES_SIMPLES["auto_escala"],
 		"APRENDIZADO: LIGADO" if auto_escala.ligada else "APRENDIZADO: DESLIGADO",
@@ -5097,39 +5217,39 @@ func _central_golpe() -> void:
 		estado = "desligado — a régua fica exatamente onde você deixou"
 	elif auto_escala.pronta():
 		estado = "ativo — %d socos na memória, ajustando aos poucos" % memoria
-	_texto(estado, 930.0, 16, Paleta.CREME if auto_escala.pronta() else Paleta.TINTA_FRACA)
+	_texto(estado, 968.0, 16, Paleta.CREME if auto_escala.pronta() else Paleta.TINTA_FRACA)
 	var destino := auto_escala.alvo()
 	if destino.is_empty():
 		_texto(
 			"a metade do salão fica acima de %d pontos e a metade abaixo, em qualquer gabinete" % (
 				ScoreCurve.PONTOS_DE_REFERENCIA
 			),
-			958.0, 14, Paleta.TINTA_LEVE
+			996.0, 14, Paleta.TINTA_LEVE
 		)
 	else:
 		_texto(
 			"indo para  %.2f  /  %.2f  /  %.2f m/s   (mínimo / médio / máximo)" % [
 				float(destino["vmin"]), float(destino["vref"]), float(destino["vmax"])
 			],
-			958.0, 14, Paleta.CIANO
+			996.0, 14, Paleta.CIANO
 		)
 
-	_secao(Rect2(80, 1004, 920, 236), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	_secao(Rect2(80, 1042, 920, 240), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
 	# A régua engordou e a legenda desceu: com a letra no corpo novo, o
 	# nome do nível dentro da faixa e a legenda logo abaixo escreviam um
 	# por cima do outro.
-	_regua_dos_niveis(Rect2(110, 1052, 860, 46))
+	_regua_dos_niveis(Rect2(110, 1092, 860, 46))
 	_texto(
 		"As faixas são fixas. Quem decide quanta gente chega a cada uma é o soco médio.",
-		1126.0, 15, Paleta.TINTA_FRACA
+		1166.0, 15, Paleta.TINTA_FRACA
 	)
-	_curva_desenhada(Rect2(110, 1138, 860, 56))
+	_curva_desenhada(Rect2(110, 1180, 860, 56))
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
-	_secao(Rect2(80, 1340, 920, 320), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
+	_secao(Rect2(80, 1386, 920, 324), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 1386.0), 7.0, dot, true, -1.0, true)
-	_texto(serial_status, 1392.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	draw_circle(Vector2(560, 1432.0), 7.0, dot, true, -1.0, true)
+	_texto(serial_status, 1438.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
 	_stepper(
 		"porta",
 		porta_configurada if not porta_configurada.is_empty() else "AUTO",
@@ -5138,7 +5258,7 @@ func _central_golpe() -> void:
 	)
 	var nome_polaridade: String = str({"A":"AUTO", "H":"ALTO", "L":"BAIXO"}.get(sensor_eixo, "AUTO"))
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
-	_texto("POLARIDADE DO BLOQUEIO", 1516.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_texto("POLARIDADE DO BLOQUEIO", 1562.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.0f mm" % (sensor_raio * 1000.0), "LARGURA DA PALHETA", Paleta.CIANO)
 	# O PULSO MÍNIMO PERDEU O − E O +, E ISSO É O CONSERTO.
 	#
@@ -5151,7 +5271,7 @@ func _central_golpe() -> void:
 	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
 	# dentro disso.
 	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
-	var caixa_pulso := Rect2(570, 1538, 400, LADO_BOTAO)
+	var caixa_pulso := Rect2(570, 1586, 400, LADO_BOTAO)
 	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
 	_texto(
 		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
@@ -5165,23 +5285,23 @@ func _central_golpe() -> void:
 		"o sensor mede de %.2f a %.1f m/s  •  a régua vai até %.1f" % [
 			janela.x, janela.y, hit_max_speed
 		],
-		1650.0, 15,
+		1700.0, 15,
 		Paleta.VERMELHO if janela.y < hit_max_speed else Paleta.TINTA_LEVE,
 		HORIZONTAL_ALIGNMENT_CENTER, 120.0, 840.0
 	)
 
-	_secao(Rect2(80, 1684, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_secao(Rect2(80, 1734, 920, 124), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1836.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1890.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	if not saturacao_recente.is_empty():
 		_texto(
 			"SATURAÇÃO DO SENSOR: %s" % saturacao_recente,
-			1868.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			1922.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
 
 ## A ÚLTIMA BATIDA, EM VELOCIDADE E EM PONTOS, LADO A LADO.
@@ -5310,18 +5430,42 @@ func _central_camera() -> void:
 		# este anel, os dois minutos são indistinguíveis de um botão que
 		# não fez nada — que foi exatamente a queixa que trouxe até aqui.
 		_carregando(Vector2(540.0, 1010.0), 26.0, Paleta.CIANO)
+	# A LINHA QUE RESPONDE "POR QUE NÃO FUNCIONA NAS OUTRAS MÁQUINAS".
+	#
+	# No Windows o Godot não tem câmera nenhuma por conta própria: tudo
+	# depende da extensão nativa. Sem ela, nem a webcam embutida do
+	# notebook aparece — e a tela dizia "conecte uma câmera USB", que
+	# manda procurar hardware quando o problema é um arquivo que ficou
+	# para trás na cópia. Ver `CameraService`.
+	var nativa_ok := camera_service != null and camera_service.extensao_nativa_presente()
+	if OS.get_name() == "Windows":
+		_cartao(Rect2(110, 930, 860, 56), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+		if nativa_ok:
+			_texto(
+				"EXTENSÃO NATIVA DA CÂMERA: CARREGADA", 966.0, 17, Paleta.VERDE,
+				HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
+		else:
+			_texto(
+				"EXTENSÃO NATIVA NÃO CARREGOU — SEM ELA NÃO HÁ CÂMERA NO WINDOWS",
+				960.0, 17, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
+			_texto(
+				"copie a PASTA inteira do jogo (a DLL fica ao lado do .exe) e instale o VC++ 2015-2022 x64",
+				982.0, 14, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
+			)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
 			"Captura nativa do Windows por Media Foundation — sem Python e sem OpenCV.",
-			1006.0, 15, Paleta.CIANO
+			1018.0, 15, Paleta.CIANO
 		)
 		_texto(
 			"Conecte a câmera USB: o jogo reconhece, mantém o vídeo ao vivo e só congela a foto.",
-			1030.0, 15, Paleta.TINTA_FRACA
+			1042.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
 			"DIAGNOSTICAR só consulta. RESOLVER ACESSO libera a privacidade do usuário.",
-			1054.0, 15, Paleta.TINTA_FRACA
+			1066.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
 		for i in range(medico.linhas.size()):
@@ -5921,6 +6065,15 @@ func _draw_alertas_graves() -> void:
 		recados.append(Versao.recado_do_estrago())
 	if link != null and not link.available():
 		recados.append("SEM CAMINHO ATÉ O ARDUINO — START, CRÉDITO E SENSOR MORTOS")
+	# A EXTENSÃO DA CÂMERA FALTANDO É ALERTA GRAVE, e não um detalhe de
+	# bancada: no Windows ela é a única fonte de imagem que existe, e com a
+	# câmera exigida a máquina nem chega a liberar rodada. Ficava escondida
+	# atrás do F9, que é justamente onde quem montou a máquina no salão não
+	# vai olhar. Ver `CameraService`.
+	if camera_enabled and camera_service != null \
+			and not camera_service.extensao_nativa_presente() \
+			and OS.get_name() == "Windows":
+		recados.append("FALTA A DLL DA CÂMERA — COPIE A PASTA INTEIRA DO JOGO, NÃO SÓ O .EXE")
 	if recados.is_empty():
 		return
 	var altura := 34.0 * float(recados.size()) + 16.0
@@ -6008,12 +6161,53 @@ const CAIXA_LEITURA := 1.047
 ## Quem pede menos que o piso recebe o piso. É por isso que existe um
 ## piso e não uma revisão de cada chamada: com quarenta lugares pedindo
 ## tamanho, a próxima linha escrita com 14 voltaria a ser ilegível.
-const CORPO_MINIMO := 18
+const CORPO_MINIMO := 20
+
+## A ESCALA TIPOGRÁFICA — E POR QUE ELA PRECISA EXISTIR.
+##
+## Contados, havia TRINTA corpos de letra diferentes pedidos pela tela:
+## 13, 14, 15, 16, 18, 20, 22, 24, 25, 26, 28, 30, 32, 34, 36, 38, 42, 44,
+## 46, 50, 52, 54, 56, 58, 62, 72, 88, 96, 100, 104… Nenhum deles se
+## relaciona com o vizinho; cada um nasceu de um ajuste solto num dia
+## diferente. É exatamente isso que dá a impressão de "coisas novas que
+## não estão uniformes": 15 e 16 são o MESMO tamanho para o olho, mas os
+## dois juntos na mesma tela leem como desalinho, não como hierarquia.
+##
+## Uma escala resolve com poucos degraus, cada um claramente diferente do
+## anterior. Esta cresce a cerca de 1,25× por passo — o intervalo em que
+## dois tamanhos vizinhos se distinguem sem brigar:
+##
+##   MIÚDO 20 · APOIO 25 · RÓTULO 31 · CORPO 39 · DESTAQUE 48
+##   TÍTULO 60 · CARTAZ 75 · PLACAR 94 · HERÓI 118
+##
+## COMO ELA É APLICADA SEM REESCREVER CENTO E CINQUENTA CHAMADAS. Todo
+## texto do jogo passa por `_corpo`, e é aqui que o tamanho pedido é
+## ENCAIXADO no degrau mais próximo. Um 15 e um 16 viram os dois 20; um 34
+## e um 36 viram os dois 39. A tela inteira passa a falar em nove
+## tamanhos, e uma linha nova escrita com um número solto continua caindo
+## na escala sozinha — que é o único jeito de isto não se desfazer na
+## próxima alteração.
+const ESCALA := [20, 25, 31, 39, 48, 60, 75, 94, 118]
 
 func _corpo(tamanho: int) -> int:
-	if fonte_texto == fonte:
-		return maxi(CORPO_MINIMO, tamanho)
-	return maxi(CORPO_MINIMO, int(round(float(tamanho) * CAIXA_LEITURA)))
+	var pedido := tamanho if fonte_texto == fonte else int(round(float(tamanho) * CAIXA_LEITURA))
+	return _encaixar_na_escala(maxi(CORPO_MINIMO, pedido))
+
+## O degrau mais próximo, por distância relativa — em tipografia o que o
+## olho compara é a RAZÃO entre dois tamanhos, não a diferença: de 20 para
+## 25 é o mesmo salto que de 75 para 94.
+func _encaixar_na_escala(tamanho: int) -> int:
+	var melhor: int = ESCALA[0]
+	var menor_erro := 1.0e30
+	for degrau in ESCALA:
+		var erro: float = absf(log(float(tamanho) / float(degrau)))
+		if erro < menor_erro:
+			menor_erro = erro
+			melhor = degrau
+	# Acima do maior degrau a escala não manda: o placar herói e os
+	# números gigantes do impacto são desenhados no tamanho que couber na
+	# largura da tela, e encaixá-los aqui os encolheria à toa.
+	return maxi(melhor, tamanho) if tamanho > int(ESCALA[ESCALA.size() - 1]) else melhor
 
 ## O CACHE DE `_tamanho_que_cabe`.
 ##
@@ -6140,7 +6334,7 @@ func _letreiro(
 ## permite subir o corpo dos dois papéis sem que nada estoure a linha: a
 ## tela ganha letra maior E linha mais curta ao mesmo tempo, que é o que
 ## faltava para ler de longe.
-const CORPO_ROTULO := 30
+const CORPO_ROTULO := 31
 const CORPO_APOIO := 25
 
 func _rotulo(texto: String, y: float, cor: Color) -> void:
