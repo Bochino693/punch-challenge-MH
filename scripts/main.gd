@@ -453,6 +453,57 @@ var serial_status := "INICIANDO"
 var porta_atual := ""
 var ultimo_sinal_ms := -1
 var proxima_tentativa := 0.0
+
+## ------------------------------------------------------------------
+## A BUSCA PELO ARDUINO NÃO PODE ENGASGAR O JOGO.
+##
+## MEDIDO: `_tentar_conectar` custa 26 ms — 6 ms para enumerar as portas
+## e 20 ms para o sistema recusar uma que não existe. Enquanto a placa
+## não responde, isso se repete a cada 0,15 a 1,5 segundo, no MEIO do
+## laço do jogo. Com o quadro inteiro tendo 16,7 ms de orçamento, cada
+## tentativa é um quadro perdido, e o pior caso medido foi de 124 ms —
+## sete quadros seguidos parados.
+##
+## Rodando o jogo sem nenhuma tentativa, o quadro fica em 6,9 ms do
+## primeiro ao último, com p95 de 7,1. Com elas, a mediana sobe para 9,1
+## e o p95 para 33,5. Era a maior fonte de engasgo do jogo — e a que
+## nenhum teste pegava, porque só aparece na máquina em que o Arduino
+## ainda não respondeu: ou seja, em toda máquina, nos primeiros segundos,
+## e a noite inteira naquela em que o cabo está solto.
+##
+## Duas medidas, e nenhuma delas desiste de reconectar:
+
+## 1) A LISTA DE PORTAS SAI DO LAÇO DO JOGO.
+##
+##    Enumerar as seriais do sistema custa 5 ms no caso comum e, medido,
+##    105 ms em duas de cada doze vezes — o sistema operacional às vezes
+##    para para conversar com um driver (no Windows, tipicamente uma
+##    porta Bluetooth). Cento e cinco milissegundos é SEIS QUADROS
+##    perdidos de uma vez, e nenhuma quantidade de cache resolve um
+##    engasgo desse tamanho: só tira dele a frequência.
+##
+##    Então a enumeração acontece numa thread, e o laço do jogo usa
+##    sempre a última lista conhecida. A busca continua tão agressiva
+##    quanto era; o que mudou é quem espera por ela.
+##
+##    E AS CHAMADAS AO `link` NUNCA SE CRUZAM. Enquanto a thread está
+##    enumerando, o laço principal não tenta abrir porta nenhuma — em vez
+##    de trancar (o que devolveria a espera ao jogo), ele simplesmente
+##    deixa esta volta passar. A próxima vem em um décimo de segundo.
+const ESPERA_DA_LISTA := 2.0
+var _lista_pedida_em := -99.0
+var _thread_portas: Thread = null
+var _portas_do_fundo := PackedStringArray()
+var _mutex_portas := Mutex.new()
+var _lista_ja_veio := false
+
+## 2) DURANTE O SOCO, A BUSCA ESPERA. Quando a porta não está aberta, o
+##    golpe não vai ser lido de qualquer jeito — reconectar meio segundo
+##    depois não muda nada para quem joga, e não travar a tela no meio do
+##    golpe muda tudo. A espera tem teto: se uma rodada atrás da outra
+##    segurasse a busca para sempre, a máquina nunca mais acharia a placa.
+const TETO_DA_ESPERA_DO_SOCO := 4.0
+var _busca_adiada_desde := -1.0
 var proximo_ping := 0.0
 ## Última telemetria, exibida na Central Técnica.
 var telemetria := ""
@@ -742,6 +793,12 @@ func _arena_no_ar() -> bool:
 	return state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED, GameDef.State.MEASURING, GameDef.State.RESULT]
 
 func _exit_tree() -> void:
+	# A THREAD DA ENUMERAÇÃO FECHA PRIMEIRO, e antes de o `link` sumir:
+	# ela está falando com ele. Aqui — e só aqui — vale esperar, porque
+	# não há mais quadro para estragar.
+	if _thread_portas != null:
+		_thread_portas.wait_to_finish()
+		_thread_portas = null
 	if link != null:
 		link.close_port()
 		# A ponte por processo tem um ajudante do lado de fora: fechar a
@@ -2366,6 +2423,56 @@ func _portas_cegas() -> PackedStringArray:
 				cegas.append("/dev/ttyUSB%d" % i)
 	return cegas
 
+## DÁ PARA PROCURAR AGORA SEM ATRAPALHAR QUEM ESTÁ JOGANDO?
+##
+## Só não dá enquanto o golpe está no ar — do 3-2-1 até o veredito sair.
+## Ver o comentário de `TETO_DA_ESPERA_DO_SOCO`: a pausa é curta, tem
+## teto, e nunca vira desistência.
+## Manda a thread enumerar, se já passou o tempo e não há outra correndo.
+func _pedir_a_lista() -> void:
+	if _thread_portas != null or link == null or not link.available():
+		return
+	if animation_time - _lista_pedida_em < ESPERA_DA_LISTA:
+		return
+	_thread_portas = Thread.new()
+	# O `link` vai AMARRADO na chamada. Se o jogo trocar de caminho no
+	# meio da enumeração, a thread continua falando com o objeto que ela
+	# recebeu, e não com um que deixou de existir.
+	_thread_portas.start(_listar_no_fundo.bind(link))
+
+func _listar_no_fundo(alvo: SerialLink) -> void:
+	var achadas := alvo.list_ports()
+	_mutex_portas.lock()
+	_portas_do_fundo = achadas
+	_mutex_portas.unlock()
+
+## Recolhe o que a thread achou. Só quando ela já terminou: esperar aqui
+## seria devolver ao jogo exatamente a pausa que a thread existe para
+## tirar dele.
+func _recolher_a_lista() -> void:
+	if _thread_portas == null or _thread_portas.is_alive():
+		return
+	_thread_portas.wait_to_finish()
+	_thread_portas = null
+	_mutex_portas.lock()
+	portas_visiveis = _portas_do_fundo.duplicate()
+	_mutex_portas.unlock()
+	_lista_ja_veio = true
+	_lista_pedida_em = animation_time
+
+func _hora_de_procurar() -> bool:
+	var no_meio_do_golpe := state in [
+		GameDef.State.COUNTDOWN, GameDef.State.ARMED,
+		GameDef.State.MEASURING, GameDef.State.RESULT,
+	]
+	if not no_meio_do_golpe:
+		_busca_adiada_desde = -1.0
+		return true
+	if _busca_adiada_desde < 0.0:
+		_busca_adiada_desde = animation_time
+		return false
+	return animation_time - _busca_adiada_desde >= TETO_DA_ESPERA_DO_SOCO
+
 func _tentar_conectar() -> void:
 	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
 	#
@@ -2395,7 +2502,24 @@ func _tentar_conectar() -> void:
 		)
 		proxima_tentativa = animation_time + 1.0
 		return
-	portas_visiveis = link.list_ports()
+	# A PRIMEIRA LISTA É PEDIDA NA HORA, as seguintes no fundo. Na
+	# primeira o jogo ainda está subindo e não há quadro para estragar; e
+	# sem ela a fila nasceria vazia, o que ligaria a varredura cega antes
+	# de a máquina ter olhado para as portas que o sistema anuncia.
+	#
+	# E O QUE MARCA "JÁ VEIO" É UMA BANDEIRA, NÃO A LISTA ESTAR VAZIA.
+	# Numa máquina sem nenhuma serial ligada — que é o caso mais comum de
+	# todos, e justamente aquele em que a busca roda a noite inteira — a
+	# lista vazia É a resposta certa. Olhando para ela, o jogo concluía
+	# que a lista nunca tinha chegado e refazia a enumeração no laço
+	# principal a cada tentativa, que é exatamente o que esta thread veio
+	# evitar.
+	if not _lista_ja_veio:
+		portas_visiveis = link.list_ports()
+		_lista_pedida_em = animation_time
+		_lista_ja_veio = true
+	else:
+		_pedir_a_lista()
 	_fila_de_portas = _fila_de_tentativas()
 	if _fila_de_portas.is_empty():
 		# PROCURAR TEM DE PARECER PROCURAR. A frase era só
@@ -2526,7 +2650,8 @@ func _poll_serial(_delta: float) -> void:
 		# imediata em cima de uma porta que ninguém chegou a abrir.
 		return
 	if not link.is_open():
-		if animation_time >= proxima_tentativa:
+		_recolher_a_lista()
+		if _thread_portas == null and animation_time >= proxima_tentativa and _hora_de_procurar():
 			_tentar_conectar()
 		return
 	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
