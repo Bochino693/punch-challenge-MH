@@ -3,10 +3,14 @@ extends SceneTree
 ## A CENTRAL TEM DE SER LEGÍVEL — e isso é mensurável.
 ##
 ## "Nenhum texto tapa o outro" não é uma regra que se cumpre olhando.
-## São quatro páginas, dezenas de rótulos, e basta acrescentar uma linha
+## São cinco páginas, dezenas de rótulos, e basta acrescentar uma linha
 ## para empurrar outra por baixo de um cartão. Já aconteceu duas vezes
 ## neste projeto, e nas duas o defeito só apareceu numa foto da tela —
 ## depois de o gabinete estar montado.
+##
+## E a conferência desce a página inteira, rolando: o pé de uma página
+## longa é onde mora o diagnóstico, que é o que alguém lê ao telefone às
+## onze da noite.
 ##
 ## Aqui cada texto desenhado registra o retângulo que ocupa de fato
 ## (ver `main.gd`, `_anotar_texto`), e o teste percorre as páginas
@@ -48,23 +52,48 @@ func run() -> void:
 	jogo.calib_ativo = false
 	jogo.transicao = -1.0
 
+	# A PÁGINA É CONFERIDA ROLANDO, e não só no topo.
+	#
+	# A auditoria só anota o que está DENTRO da janela que rola: o
+	# cabeçalho e o rodapé da Central são repintados opacos por cima do
+	# miolo, e acusar uma linha que eles cobrem seria apontar um defeito
+	# que ninguém vê. O preço disso é que conferir uma vez, parado no
+	# topo, deixaria de fora tudo o que mora no pé de uma página longa —
+	# que é justamente onde o diagnóstico fica.
+	#
+	# Meia janela por vez garante que toda linha apareça inteira em pelo
+	# menos uma das passagens.
 	for pagina in range(jogo.PAGINAS.size()):
 		jogo.central_pagina = pagina
+		var rolagem := 0.0
+		var voltas := 0
+		while voltas < 24:
+			jogo.central_rolagem = rolagem
+			# `clear()`, E NÃO `= []`. Atribuir um array destipado a uma
+			# propriedade `Array[Dictionary]` de outro script TRAVA o
+			# motor aqui — o processo fica vivo e o quadro nunca mais
+			# acontece. Custou meia hora para achar, e o sintoma não
+			# aponta para a causa em lugar nenhum.
+			jogo.auditoria.clear()
+			jogo.auditoria_de_layout = true
+			await quadro()
+			jogo.auditoria_de_layout = false
+			var anotados: Array = jogo.auditoria.duplicate()
+			if rolagem == 0.0:
+				_ok(anotados.size() > 4,
+					"a página %s tem de desenhar texto (anotou %d)"
+						% [jogo.PAGINAS[pagina], anotados.size()])
+			var onde := "%s" % jogo.PAGINAS[pagina]
+			if rolagem > 0.0:
+				onde += " (rolada %d px)" % int(rolagem)
+			_conferir_corpo(onde, anotados)
+			_conferir_cruzamento(onde, anotados)
+			var maxima: float = jogo._rolagem_maxima()
+			if rolagem >= maxima:
+				break
+			rolagem = minf(rolagem + jogo.CENTRAL_JANELA * 0.5, maxima)
+			voltas += 1
 		jogo.central_rolagem = 0.0
-		# `clear()`, E NÃO `= []`. Atribuir um array destipado a uma
-		# propriedade `Array[Dictionary]` de outro script TRAVA o motor
-		# aqui — o processo fica vivo e o quadro nunca mais acontece.
-		# Custou meia hora para achar, e o sintoma não aponta para a
-		# causa em lugar nenhum.
-		jogo.auditoria.clear()
-		jogo.auditoria_de_layout = true
-		await quadro()
-		jogo.auditoria_de_layout = false
-		var anotados: Array = jogo.auditoria.duplicate()
-		_ok(anotados.size() > 4,
-			"a página %s tem de desenhar texto (anotou %d)" % [jogo.PAGINAS[pagina], anotados.size()])
-		_conferir_corpo(str(jogo.PAGINAS[pagina]), anotados)
-		_conferir_cruzamento(str(jogo.PAGINAS[pagina]), anotados)
 
 	if falhas == 0:
 		print("CENTRAL_LEGIVEL_OK")

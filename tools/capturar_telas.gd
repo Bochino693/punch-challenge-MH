@@ -40,6 +40,7 @@ func _initialize() -> void:
 		{"nome": "11_central_golpe", "fn": _central.bind(1)},
 		{"nome": "12_central_camera", "fn": _central.bind(2)},
 		{"nome": "13_central_dados", "fn": _central.bind(3)},
+		{"nome": "13b_central_saco", "fn": _central.bind(4)},
 		{"nome": "14_calibracao_repouso", "fn": _calibracao.bind(0)},
 		{"nome": "15_calibracao_golpes", "fn": _calibracao.bind(1)},
 		{"nome": "16_calibracao_sugestao", "fn": _calibracao.bind(3)},

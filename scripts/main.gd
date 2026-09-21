@@ -82,7 +82,13 @@ const RANKING_TAMANHO := 20
 ##
 ## Quatro páginas, cada uma com um assunto: como a máquina opera, como
 ## ela mede o golpe, o que ela vê e ouve, e o que ela guardou.
-const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS"]
+## A PÁGINA DO MOTOR ENTRA POR ÚLTIMO, DE PROPÓSITO.
+##
+## `PAGINA_DO_CONTROLE` guarda o número da página de cada botão. Uma aba
+## nova no MEIO renumeraria todas as de baixo, e um botão que acredita
+## estar em outra página responde a clique sem estar desenhado — a pior
+## espécie de defeito, porque só aparece na mão de quem estiver usando.
+const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS", "SACO"]
 
 ## Os retângulos dos botões NÃO são escritos à mão. Um par de − / + com o
 ## valor no meio é um "passo" (`_passo`), e é ele que decide onde ficam
@@ -105,6 +111,9 @@ const PASSOS := {
 	"raio": Rect2(110, 1566, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
+	# --- página SACO
+	"curso_motor": Rect2(110, 700, 400, LADO_BOTAO),
+	"pausa_motor": Rect2(570, 700, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 ## AS TRÊS MOLDURAS DA PÁGINA DADOS, EM UM LUGAR SÓ.
@@ -113,6 +122,13 @@ const PASSOS := {
 ## cada quadro: sem uma âncora comum, mover uma seção deixava os botões
 ## dela para trás — foi assim que o RITMO passou a desenhar as linhas
 ## acima da própria moldura.
+## As mesmas âncoras para a página SACO. O botão TENTAR DE NOVO já
+## nasceu 246 px acima da moldura a que pertence, por cima da linha que
+## diz onde o saco está — o mesmo defeito, no mesmo dia.
+const SACO_ESTADO_Y := 1120.0
+const SACO_ESTADO_H := 282.0
+const SACO_SOCORRO_Y := SACO_ESTADO_Y + SACO_ESTADO_H + 24.0
+
 const DADOS_DIAG_Y := 600.0
 const DADOS_RITMO_Y := 1194.0
 const DADOS_APAGAR_Y := 1490.0
@@ -158,6 +174,13 @@ const BOTOES_SIMPLES := {
 	"zerar_ranking": Rect2(544, DADOS_APAGAR_Y + 70.0, 207, 60),
 	"reconectar": Rect2(761, DADOS_APAGAR_Y + 70.0, 209, 60),
 	"teto_efeitos": Rect2(110, DADOS_RITMO_Y + 196.0, 400, 56),
+	# --- página SACO
+	"motor_ligado": Rect2(110, 400, 400, 64),
+	"motor_fim_curso": Rect2(570, 400, 400, 64),
+	"motor_desce": Rect2(110, 950, 275, 64),
+	"motor_sobe": Rect2(402, 950, 275, 64),
+	"motor_para": Rect2(695, 950, 275, 64),
+	"motor_destrava": Rect2(110, SACO_SOCORRO_Y + 66.0, 400, 60),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -181,9 +204,11 @@ const PAGINA_DO_CONTROLE := {
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 	"teto_efeitos": 3,
+	"motor_ligado": 4, "motor_fim_curso": 4, "curso_motor": 4, "pausa_motor": 4,
+	"motor_desce": 4, "motor_sobe": 4, "motor_para": 4, "motor_destrava": 4,
 }
 ## As abas, no topo da caixa.
-const ABA_LARGURA := 230.0
+const ABA_LARGURA := 184.0
 const ABA_RECT := Rect2(80, 250, 920, 62)
 
 var state: GameDef.State = GameDef.State.IDLE
@@ -3334,6 +3359,34 @@ func _enviar_config() -> void:
 		))
 		link.send_line(ArduinoProtocol.build_motor("ESTADO"))
 
+## SÓ O AJUSTE DO MOTOR, sem arrastar junto a config do sensor.
+##
+## Mexer no tempo de curso não pode reenviar a calibração do golpe: a
+## placa reabre a janela de medida ao receber CONFIG, e fazer isso no
+## meio de uma partida perderia o soco de quem está batendo.
+func _mandar_config_do_motor() -> void:
+	if link != null and link.is_open():
+		link.send_line(ArduinoProtocol.build_motor_config(
+			saco.curso_ms, saco.pausa_ms, saco.fim_de_curso
+		))
+
+## O MANDO À MÃO, para montar a máquina e para o conserto.
+##
+## `SacoMotor` trabalha por INTENÇÃO — o jogo diz onde o saco deve
+## estar, não "liga o motor" —, e é isso que impede o laço infinito. O
+## botão da Central usa a mesma porta: ele muda a intenção, e o passo de
+## sempre é que fala com a placa. Não há um segundo caminho até o motor,
+## e por isso não há um segundo jeito de deixá-lo ligado.
+func _mando_do_motor(onde: int) -> void:
+	if not saco.ligado:
+		_show_notice("LIGUE O MOTOR NESTA PÁGINA ANTES")
+		return
+	if link == null or not link.is_open():
+		_show_notice("SEM PLACA — O MOTOR NÃO RESPONDE")
+		return
+	saco.quero(onde)
+	_show_notice("DESCENDO O SACO" if onde == SacoMotor.Onde.EM_BAIXO else "SUBINDO O SACO")
+
 ## Cada tentativa abre uma janela nova também na placa. Isto elimina estado
 ## residual do retorno da palheta e garante o mesmo caminho para soco 1 e 2.
 func _armar_sensor_optico() -> void:
@@ -3518,6 +3571,44 @@ func _click_central(p: Vector2) -> void:
 	elif _tocou("mapear_credito", p):
 		mapeando = "" if mapeando == "credito" else "credito"
 		return
+	elif _tocou("motor_ligado", p):
+		saco.ligado = not saco.ligado
+		if not saco.ligado:
+			# DESLIGAR TEM DE PARAR O MOTOR, e não só o jogo de falar com
+			# ele. Um motor descendo quando o operador desliga a função e
+			# vai embora é a correia no chão de manhã.
+			var freio := saco.parar()
+			if link != null and link.is_open() and not freio.is_empty():
+				link.send_line(freio)
+		_salvar()
+		_show_notice("MOTOR DO SACO LIGADO" if saco.ligado else "MOTOR DO SACO DESLIGADO")
+	elif _tocou("motor_fim_curso", p):
+		saco.fim_de_curso = not saco.fim_de_curso
+		_mandar_config_do_motor()
+		_salvar()
+		_show_notice(
+			"USANDO OS FINS DE CURSO" if saco.fim_de_curso
+			else "SÓ POR TEMPO — SEM FIM DE CURSO"
+		)
+	elif _tocou("motor_desce", p):
+		_mando_do_motor(SacoMotor.Onde.EM_BAIXO)
+	elif _tocou("motor_sobe", p):
+		_mando_do_motor(SacoMotor.Onde.EM_CIMA)
+	elif _tocou("motor_para", p):
+		# PARAR VALE MESMO COM A FUNÇÃO DESLIGADA e mesmo sem intenção
+		# aberta: é o botão de emergência da página, e um botão de
+		# emergência que às vezes não responde não é botão de emergência.
+		var freio := saco.parar()
+		if link != null and link.is_open() and not freio.is_empty():
+			link.send_line(freio)
+		_show_notice("MOTOR PARADO")
+	elif _tocou("motor_destrava", p):
+		# DESISTIU não é um defeito a esconder: é a placa não tendo
+		# confirmado o curso. Destravar é o operador dizendo "arrumei o
+		# fio, pode tentar de novo" — e sem isso a única saída seria
+		# fechar o jogo.
+		saco.destravar()
+		_show_notice("MOTOR LIBERADO PARA TENTAR DE NOVO")
 	elif _tocou("modo_livre", p):
 		game_mode = "free"
 	elif _tocou("modo_ficha", p):
@@ -3748,6 +3839,19 @@ func _ajustar(chave: String, direcao: int) -> void:
 			_girar_porta(direcao)
 		"raio":
 			sensor_raio = clampf(sensor_raio + direcao * 0.001, 0.005, 0.100)
+		# O TEMPO DE CURSO É O FREIO DE SEGURANÇA DO MOTOR, não um gosto.
+		#
+		# É ele que a placa usa para desligar sozinha quando o fim de
+		# curso não responde: passou do tempo, para. O teto de 15 s vem
+		# do firmware (MOTOR_CURSO_MAX_MS) e é repetido aqui porque um
+		# número maior na Central viraria uma promessa que a placa não
+		# cumpre — e o operador confiaria nela.
+		"curso_motor":
+			saco.curso_ms = clampi(saco.curso_ms + direcao * 250, 500, 15000)
+			_mandar_config_do_motor()
+		"pausa_motor":
+			saco.pausa_ms = clampi(saco.pausa_ms + direcao * 50, 100, 2000)
+			_mandar_config_do_motor()
 
 	_aplicar_faixas()
 
@@ -5139,6 +5243,7 @@ func _draw_central() -> void:
 	# cima dele, que é o que o operador lê.
 	if auditoria_de_layout:
 		auditoria.clear()
+		_auditando_o_miolo = true
 
 	# ---- O MIOLO, deslocado pela rolagem.
 	#
@@ -5155,9 +5260,12 @@ func _draw_central() -> void:
 			_central_camera()
 		3:
 			_central_dados()
+		4:
+			_central_maquina()
 		_:
 			_central_operacao()
 	draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+	_auditando_o_miolo = false
 
 	# ---- As faixas paradas, cobrindo o que a página passou por baixo.
 	draw_rect(Rect2(45, 101, 990, CENTRAL_TOPO - 101.0), CENTRAL_FUNDO)
@@ -5200,10 +5308,13 @@ func _abas_da_central() -> void:
 		)
 		var atual := i == central_pagina
 		_cartao(r, Paleta.AMBAR if atual else Color("330c16"), Paleta.CARTAO_BORDA, 1.0, 2.0)
-		_texto(
+		# `_texto_cabendo`, e não `_texto`: com cinco abas em 920 px o
+		# rótulo mais longo não cabe em corpo 20, e letra transbordando
+		# a aba ao lado é exatamente o que esta revisão foi caçar.
+		_texto_cabendo(
 			str(PAGINAS[i]), r.position.y + 40.0, 20,
 			Color("2b0a13") if atual else Paleta.TINTA_FRACA,
-			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+			r.size.x - 16.0, r.position.x + 8.0
 		)
 
 # ---------------------------------------------------------- OPERAÇÃO
@@ -5924,6 +6035,136 @@ func _linha(texto: String, tamanho: int, cor: Color) -> float:
 	_texto(texto, _pilha_y, tamanho, cor, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
 	return _pilha_y
 
+# ------------------------------------------------------- SACO E MOTOR
+## A PÁGINA DO MOTOR QUE BAIXA E LEVANTA O SACO.
+##
+## Ela existe porque um motor não é um LED. Um LED aceso por engano é um
+## LED aceso; um motor ligado por engano é uma correia arrebentada, um
+## saco no chão ou um fim de curso destruído — e isso acontece longe de
+## quem programou, numa festa, às onze da noite, com o operador olhando
+## uma tela que não conta nada.
+##
+## Então esta página conta tudo: se a função está ligada, onde o saco
+## está AGORA, quanto falta do curso em uma barra que anda, o que a
+## placa respondeu por último, e os três botões de mando à mão para quem
+## está montando a máquina. O botão PARAR responde sempre, inclusive com
+## a função desligada.
+func _central_maquina() -> void:
+	# ---- LIGAR, E DIZER O QUE ISSO MUDA
+	_secao(Rect2(80, 350, 920, 200), "MOTOR DO SACO", Paleta.ROXO)
+	_botao(
+		BOTOES_SIMPLES["motor_ligado"],
+		"LIGADO" if saco.ligado else "DESLIGADO",
+		saco.ligado, Paleta.VERDE if saco.ligado else Paleta.TINTA_FRACA, 22
+	)
+	# O FIM DE CURSO É UMA ESCOLHA DE MONTAGEM, não um gosto.
+	#
+	# Com as duas chaves instaladas, a placa para no instante em que o
+	# saco chega — é o certo. Sem elas (montagem mais simples, ou uma
+	# chave que quebrou no meio da festa), sobra o tempo de curso, e a
+	# máquina continua funcionando enquanto a peça não chega.
+	_botao(
+		BOTOES_SIMPLES["motor_fim_curso"],
+		"FINS DE CURSO: SIM" if saco.fim_de_curso else "FINS DE CURSO: NÃO",
+		saco.fim_de_curso, Paleta.CIANO, 18
+	)
+	_texto(
+		"O saco desce no START e sobe quando os dois socos terminam. Sem motor, o jogo é exatamente o mesmo.",
+		522.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- OS DOIS NÚMEROS QUE A PLACA PRECISA CONHECER
+	_secao(Rect2(80, 590, 920, 266), "TEMPOS DO CURSO", Paleta.AMBAR)
+	_stepper("curso_motor", "%.1f s" % (saco.curso_ms / 1000.0), "TEMPO DE CURSO", Paleta.AMBAR)
+	_stepper("pausa_motor", "%d ms" % saco.pausa_ms, "PAUSA AO INVERTER", Paleta.CIANO)
+	# ESTE É O FREIO DE SEGURANÇA, e o técnico precisa ler isso na tela.
+	# Quem regula um "tempo" sem saber que ele DESLIGA o motor o encurta
+	# achando que está acelerando a descida — e passa a ter um saco que
+	# para no meio do caminho toda vez.
+	_texto(
+		"Passado o tempo de curso, a placa DESLIGA o motor sozinha, mesmo sem fim de curso.",
+		826.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- MANDAR À MÃO, PARA MONTAR E PARA CONSERTAR
+	_secao(Rect2(80, 890, 920, 190), "MANDO À MÃO", Paleta.CIANO)
+	var pode := saco.ligado and link != null and link.is_open()
+	_botao(BOTOES_SIMPLES["motor_desce"], "DESCER", false, Paleta.CIANO, 20, not pode)
+	_botao(BOTOES_SIMPLES["motor_sobe"], "SUBIR", false, Paleta.CIANO, 20, not pode)
+	# PARAR NUNCA FICA DESBOTADO. É o botão de emergência da página, e um
+	# botão de emergência que às vezes não responde não é botão de
+	# emergência — ele vale com a função desligada e sem curso em
+	# andamento.
+	_botao(BOTOES_SIMPLES["motor_para"], "PARAR", false, Paleta.VERMELHO, 20)
+	_texto(
+		"Use com o gabinete aberto para acertar a altura do saco e conferir os fins de curso.",
+		1052.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- O QUE ESTÁ ACONTECENDO AGORA
+	var caixa_estado := Rect2(80, SACO_ESTADO_Y, 920, SACO_ESTADO_H)
+	_secao(caixa_estado, "ONDE O SACO ESTÁ", Paleta.VERDE)
+	var cor_estado := Paleta.TINTA_LEVE
+	if saco.desistiu():
+		cor_estado = Paleta.VERMELHO
+	elif saco.andando():
+		cor_estado = Paleta.AMBAR
+	elif saco.ligado:
+		cor_estado = Paleta.VERDE
+	# A BARRA ANDA DE VERDADE: ela vem do `resta_ms` que a própria placa
+	# manda a cada relatório, não de um relógio daqui. Uma barra animada
+	# por conta própria continuaria andando com o cabo arrancado, e é
+	# justamente aí que ela precisa parar.
+	# A BARRA CHEIA SÓ QUANDO O SACO ESTÁ ONDE SE SABE QUE ELE ESTÁ.
+	#
+	# `progresso()` devolve 1 com o motor parado, o que é certo para o
+	# fim de um curso e MENTIRA com a função desligada: uma barra cheia
+	# embaixo de "MOTOR DESLIGADO" se lê como "pronto, chegou", quando o
+	# jogo não faz ideia de onde o saco está.
+	var quanto := 0.0
+	if saco.andando():
+		quanto = saco.progresso()
+	elif saco.ligado and saco.posicao != ArduinoProtocol.POS_DESCONHECIDA:
+		quanto = 1.0
+	_andamento(Rect2(110, 1176, 860, 12), quanto, cor_estado)
+	_pilha(caixa_estado)
+	_pilha_y += 34.0
+	_linha(saco.ficha(), 20, cor_estado)
+	_linha(
+		"placa diz: %s  •  %s" % [
+			ArduinoProtocol.nome_do_estado(saco.estado),
+			ArduinoProtocol.nome_da_posicao(saco.posicao),
+		],
+		16, Paleta.TINTA_LEVE
+	)
+	_linha(
+		"resta do curso: %d ms  •  curso ajustado: %d ms" % [saco.resta_ms, saco.curso_ms],
+		15, Paleta.TINTA_LEVE
+	)
+	_linha(
+		"caminho até a placa: %s" % (
+			link.descricao() if link != null and link.is_open() else "NENHUM — o motor não responde"
+		),
+		15, Paleta.VERDE if link != null and link.is_open() else Paleta.VERMELHO
+	)
+
+	# ---- QUANDO A PLACA NÃO CONFIRMA
+	#
+	# `SacoMotor` desiste depois de um tempo sem confirmação, de
+	# propósito: insistir para sempre É o laço infinito com outro nome, e
+	# foi exatamente o que se pediu para não existir aqui. Desistir, por
+	# outro lado, não pode ser definitivo — senão um fio que alguém
+	# reencaixa em dez segundos deixa o saco parado até alguém fechar o
+	# jogo.
+	_secao(Rect2(80, SACO_SOCORRO_Y, 920, 176), "SE O MOTOR NÃO RESPONDER", Paleta.VERMELHO)
+	_botao(BOTOES_SIMPLES["motor_destrava"], "TENTAR DE NOVO", false, Paleta.AMBAR, 18, not saco.desistiu())
+	_texto(
+		"O jogo desiste depois de %.0f s sem confirmação, em vez de insistir para sempre." % (
+			SacoMotor.FOLGA_DA_CONFIRMACAO_MS / 1000.0
+		),
+		SACO_SOCORRO_Y + 158.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
 ## Os índices achados, em uma linha. Escrito à mão porque um `map` com
 ## lambda aqui não deixa o GDScript inferir o tipo, e tipo inferido é o
 ## que faz este arquivo compilar rápido.
@@ -6059,17 +6300,29 @@ func _seletor_porta_refinado() -> void:
 		draw_arc(centro, 9.0, inicio, inicio + 1.75, 16, Color(cor, 0.82), 1.2, true)
 
 	var porta := porta_configurada if not porta_configurada.is_empty() else "AUTO"
-	_texto_cabendo(porta, visor.position.y + 39.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
-	_texto(
-		"BUSCA AUTOMÁTICA" if porta_configurada.is_empty() else "PORTA PREFERENCIAL",
-		visor.position.y + 55.0, 10, Color(cor, 0.80),
-		HORIZONTAL_ALIGNMENT_CENTER, visor.position.x + 42.0, visor.size.x - 52.0
-	)
+	# O NOME DA PORTA E A LEGENDA DIVIDIAM UM VISOR DE 64 PX, a 16 px um
+	# do outro, com o nome em corpo 25: a legenda entrava pela barriga
+	# das letras de cima e nenhuma das duas se lia. Não era questão de
+	# afastar mais — as duas linhas não cabem nessa altura, e insistir
+	# nisso só trocaria a sobreposição por um rodapé colado na borda.
+	#
+	# A legenda desceu para a linha de ajuda, onde havia espaço e onde
+	# ela ainda diz o que precisa dizer. O visor ficou com o nome da
+	# porta, centrado, que é o que se lê de longe.
+	#
+	# Só apareceu quando a auditoria passou a enxergar `_texto_cabendo`:
+	# até então, todo rótulo de botão e todo valor de visor eram um ponto
+	# cego do teste.
+	_texto_cabendo(porta, visor.position.y + 43.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
 
 	draw_circle(Vector2(126.0, 1431.0), 4.0, cor, true, -1.0, true)
 	_texto_cabendo(serial_status, 1437.0, 14, Paleta.para_texto(cor), 822.0, 140.0)
 	_texto(
-		"O jogo continua aberto e reconecta sozinho",
+		(
+			"BUSCA AUTOMÁTICA — o jogo continua aberto e reconecta sozinho"
+			if porta_configurada.is_empty()
+			else "PORTA PREFERENCIAL — o jogo continua aberto e reconecta sozinho"
+		),
 		r.end.y + 27.0, 13, Paleta.TINTA_FRACA,
 		HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
 	)
@@ -6394,6 +6647,12 @@ func _icone(nome: String, centro: Vector2, raio: float, cor: Color) -> void:
 ##
 ## Ela fica DESLIGADA no jogo e não custa nada: uma comparação por texto.
 var auditoria_de_layout := false
+## Liga enquanto o MIOLO que rola está sendo desenhado. O cabeçalho e o
+## rodapé da Central são repintados opacos por cima dele: uma linha que
+## caia fora da janela não é lida por ninguém, e acusá-la seria apontar
+## um defeito que não existe — ao mesmo tempo em que os botões do rodapé,
+## esses sim sempre visíveis, precisam continuar sendo medidos.
+var _auditando_o_miolo := false
 var auditoria: Array[Dictionary] = []
 
 func _anotar_texto(
@@ -6414,6 +6673,11 @@ func _anotar_texto(
 	# passar as que existem.
 	var acima := fonte_texto.get_ascent(corpo)
 	var abaixo := fonte_texto.get_descent(corpo)
+	if _auditando_o_miolo and (y - acima < CENTRAL_TOPO or y + abaixo > CENTRAL_BASE):
+		# Fora da janela que rola: as faixas opacas cobrem esta linha
+		# inteira. Ela volta à vista quando o operador rolar a página, e
+		# aí já não há faixa nenhuma sobre ela.
+		return
 	auditoria.append({
 		"rect": Rect2(esquerda, y - acima, medida.x, acima + abaixo),
 		"texto": texto, "corpo": corpo,
@@ -6695,8 +6959,17 @@ func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largur
 	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
 	_letreiro(texto, Vector2(x + (largura - medida.x) * 0.5, y), tamanho, cor, Color(cor, 0.28))
 
+## A AUDITORIA PRECISA VER ESTA FUNÇÃO TAMBÉM.
+##
+## Enquanto ela desenhou direto, o teste de legibilidade tinha um ponto
+## cego do tamanho da Central: TODO rótulo de botão e TODO valor de
+## stepper sai por aqui, e nenhum deles passava por `_texto`. O primeiro
+## defeito que isso escondeu foi na página nova — o botão TENTAR DE NOVO
+## cobrindo, por inteiro, a linha que diz onde o saco está.
 func _texto_cabendo(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:
+	var corpo := _tamanho_que_cabe(texto, _corpo(tamanho_max), largura, fonte_texto)
 	draw_string(
-		fonte_texto, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura,
-		_tamanho_que_cabe(texto, _corpo(tamanho_max), largura, fonte_texto), cor
+		fonte_texto, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura, corpo, cor
 	)
+	if auditoria_de_layout:
+		_anotar_texto(texto, y, corpo, HORIZONTAL_ALIGNMENT_CENTER, x, largura)
