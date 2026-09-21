@@ -72,13 +72,40 @@ static func score_at(entries: Array[Dictionary], index: int) -> int:
 		return 0
 	return int(entries[index].get("score", 0))
 
-static func delete_photo(path: String) -> void:
-	if path.begins_with(PHOTO_DIR) and FileAccess.file_exists(path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+## Devolve `true` quando a foto não está mais lá — apagada agora ou já
+## ausente. `false` é arquivo que RESISTIU (em uso, sem permissão), e a
+## faxina conta esses em vez de fingir que deu certo.
+static func delete_photo(path: String) -> bool:
+	if not path.begins_with(PHOTO_DIR):
+		return true
+	if not FileAccess.file_exists(path):
+		return true
+	return DirAccess.remove_absolute(ProjectSettings.globalize_path(path)) == OK
 
 static func clear_photos(entries: Array[Dictionary]) -> void:
 	for entry in entries:
 		delete_photo(str(entry.get("photo_path", "")))
+
+## TODA FOTO QUE ESTÁ NA PASTA, e não só as vinte que a lista conhece.
+##
+## Esta diferença é o defeito inteiro: o ranking guarda vinte marcas, e
+## quem entrou nele e depois caiu dele deixou a foto para trás. O
+## "RANKING + FOTOS" varria a LISTA, então essas nunca saíam de lugar
+## nenhum — numa casa que roda há um mês, o operador apagava vinte
+## arquivos e deixava centenas. Quem lê a pasta encontra as centenas.
+static func listar_fotos() -> PackedStringArray:
+	var achadas := PackedStringArray()
+	var pasta := DirAccess.open(PHOTO_DIR)
+	if pasta == null:
+		return achadas
+	pasta.list_dir_begin()
+	var nome := pasta.get_next()
+	while nome != "":
+		if not pasta.current_is_dir():
+			achadas.append("%s/%s" % [PHOTO_DIR, nome])
+		nome = pasta.get_next()
+	pasta.list_dir_end()
+	return achadas
 
 static func _new_entry(score: int, photo_path: String, source: String) -> Dictionary:
 	return {

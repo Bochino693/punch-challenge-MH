@@ -30,3 +30,29 @@ MEDIDA:
 Padrao: palheta 20 mm, pulso minimo 0,70 ms, polaridade AUTO. Ligue a
 maquina com a fenda livre. A palheta deve entrar e sair completamente.
 
+
+MOTOR DO SACO (opcional)
+------------------------
+O saco desce no START e sobe no fim da rodada. Sem ele ligado, o jogo
+funciona exatamente igual.
+
+  D7  -> IN1 da ponte H  (DESCE)
+  D8  -> IN2 da ponte H  (SOBE)
+  D10 -> fim de curso DE BAIXO, contato para GND  (opcional)
+  D11 -> fim de curso DE CIMA,  contato para GND  (opcional)
+
+A ponte H tem fonte PROPRIA para o motor. O GND dela e o GND do Arduino
+precisam estar juntos, senao os comandos chegam como ruido.
+
+AS DUAS SAIDAS NUNCA FICAM ALTAS AO MESMO TEMPO. Numa ponte H isso e
+conducao cruzada e queima o componente; num par de reles e um curto entre
+as duas polaridades. O firmware garante isso num lugar so (motorParar).
+
+O CURSO E POR TEMPO, ajustado na Central em "MOTOR DO SACO". Meça quanto
+o seu motor leva de cima a baixo e ponha esse valor mais uns 10%. Os fins
+de curso, se existirem, param antes; o tempo e o teto que vale mesmo se
+um deles falhar.
+
+PRIMEIRA VEZ: use o botao SOBE da Central com o saco a meia altura e
+confira que ele sobe. Se descer, inverta os dois fios do motor na ponte H
+(nao mexa no D7/D8).

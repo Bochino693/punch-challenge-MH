@@ -634,3 +634,88 @@ pergunta em laço.
 O arquivo está no `.gitignore` desde a BUILD 43: ele continua nascendo na
 máquina de quem desenvolve, mas não entra mais no repositório e não
 atrapalha mais nenhum `pull`.
+
+---
+
+# O MOTOR DO SACO
+
+O saco desce quando a rodada começa e sobe quando ela acaba. Quem liga e
+desliga o motor é **sempre o firmware**; o jogo apenas diz onde o saco
+deve estar.
+
+## Ligação
+
+Duas saídas digitais comandam uma ponte H (L298N: `IN1`/`IN2`; BTS7960:
+`RPWM`/`LPWM`) ou um par de relés com intertravamento mecânico.
+
+| pino | função |
+|---|---|
+| `D7` | DESCE |
+| `D8` | SOBE |
+| `D10` | fim de curso de baixo — para GND, **opcional** |
+| `D11` | fim de curso de cima — para GND, **opcional** |
+
+As duas saídas **nunca** ficam altas ao mesmo tempo: numa ponte H isso é
+condução cruzada e o componente queima; num par de relés é um curto entre
+as duas polaridades. Só existe um lugar no firmware que desliga as duas
+(`motorParar`), e toda mudança de sentido passa por ele.
+
+## Comandos (jogo → placa)
+
+| linha | o que faz |
+|---|---|
+| `MOTOR,DESCE` | começa a descida |
+| `MOTOR,SOBE` | começa a subida |
+| `MOTOR,PARA` | desliga as duas saídas na hora |
+| `MOTOR,ESTADO` | pede o relato sem mexer em nada |
+| `MOTOR,CONFIG,<curso_ms>,<pausa_ms>,<fim_de_curso>` | ajusta o curso |
+
+`DESCE` e `SOBE` são **idempotentes**: mandar `DESCE` enquanto já desce
+não reinicia o cronômetro, e mandar `DESCE` com o saco já embaixo não faz
+nada. É isso que impede o jogo de manter o motor ligado à força de
+repetir o comando.
+
+`curso_ms` vai de 200 a **15000** e `pausa_ms` de 50 a 2000 — os mesmos
+limites dos dois lados do cabo, conferidos por teste. Um valor que o jogo
+aceita e a placa recusa vira uma configuração que parece ter sido gravada
+e não foi.
+
+## Relato (placa → jogo)
+
+```
+MOTOR,<estado>,<posicao>,<resta_ms>
+```
+
+| campo | valores |
+|---|---|
+| `estado` | 0 parado · 1 descendo · 2 subindo |
+| `posicao` | 0 desconhecida · 1 em cima · 2 em baixo |
+| `resta_ms` | quanto falta do curso atual |
+
+A placa manda esta linha a **cada mudança**, e nunca em repetição: quem
+a recebe sabe o que o motor está fazendo sem precisar perguntar.
+`resta_ms` é o que permite à Central desenhar uma barra que anda de
+verdade em vez de um "aguarde" parado.
+
+`posicao` nasce **desconhecida** e só deixa de ser depois do primeiro
+curso completo. No arranque o firmware não tem como saber onde o saco
+está, e fingir que sabe seria pior do que admitir.
+
+## As três garantias
+
+**O curso é por tempo, e o tempo é o teto.** Um saco de pancada não tem
+encoder e não precisa de um: o curso é sempre o mesmo. Os fins de curso,
+quando existem, param antes; o tempo é o limite que vale mesmo se um
+deles falhar, se o cabo soltar ou se a correia patinar. Acima de tudo:
+**é o firmware que desliga**, inclusive se o jogo travar, fechar ou o
+cabo cair.
+
+**Não há laço nenhum.** Nada de `while` esperando chegar: o estado avança
+em `motorAtualizar`, chamada uma vez por volta do `loop`. Um firmware
+preso esperando um motor é um firmware que parou de ler o sensor e de
+responder — e aí ninguém consegue nem mandar parar.
+`sh tools/conferir_firmware.sh` falha se alguém reintroduzir um.
+
+**Sem motor, o jogo é o mesmo.** Um gabinete sem motor ligado (ou com ele
+desligado na Central) joga exatamente igual. É a diferença entre um
+recurso e uma dependência.

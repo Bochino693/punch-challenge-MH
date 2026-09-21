@@ -82,7 +82,13 @@ const RANKING_TAMANHO := 20
 ##
 ## Quatro páginas, cada uma com um assunto: como a máquina opera, como
 ## ela mede o golpe, o que ela vê e ouve, e o que ela guardou.
-const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS"]
+## A PÁGINA DO MOTOR ENTRA POR ÚLTIMO, DE PROPÓSITO.
+##
+## `PAGINA_DO_CONTROLE` guarda o número da página de cada botão. Uma aba
+## nova no MEIO renumeraria todas as de baixo, e um botão que acredita
+## estar em outra página responde a clique sem estar desenhado — a pior
+## espécie de defeito, porque só aparece na mão de quem estiver usando.
+const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS", "SACO"]
 
 ## Os retângulos dos botões NÃO são escritos à mão. Um par de − / + com o
 ## valor no meio é um "passo" (`_passo`), e é ele que decide onde ficam
@@ -102,11 +108,31 @@ const PASSOS := {
 	"referencia": Rect2(110, 526, 400, 58),
 	"curva": Rect2(570, 526, 400, 58),
 	"porta": Rect2(110, 1470, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1586, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1566, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
+	# --- página SACO
+	"curso_motor": Rect2(110, 700, 400, LADO_BOTAO),
+	"pausa_motor": Rect2(570, 700, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
+## AS TRÊS MOLDURAS DA PÁGINA DADOS, EM UM LUGAR SÓ.
+##
+## Os retângulos dos botões são `const` e as molduras são desenhadas a
+## cada quadro: sem uma âncora comum, mover uma seção deixava os botões
+## dela para trás — foi assim que o RITMO passou a desenhar as linhas
+## acima da própria moldura.
+## As mesmas âncoras para a página SACO. O botão TENTAR DE NOVO já
+## nasceu 246 px acima da moldura a que pertence, por cima da linha que
+## diz onde o saco está — o mesmo defeito, no mesmo dia.
+const SACO_ESTADO_Y := 1120.0
+const SACO_ESTADO_H := 282.0
+const SACO_SOCORRO_Y := SACO_ESTADO_Y + SACO_ESTADO_H + 24.0
+
+const DADOS_DIAG_Y := 600.0
+const DADOS_RITMO_Y := 1194.0
+const DADOS_APAGAR_Y := 1490.0
+
 const BOTOES_SIMPLES := {
 	"fechar": Rect2(920, 140, 68, 64),
 	# --- página OPERAÇÃO
@@ -143,11 +169,18 @@ const BOTOES_SIMPLES := {
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
-	"zerar": Rect2(110, 1358, 207, 60),
-	"zerar_stats": Rect2(327, 1358, 207, 60),
-	"zerar_ranking": Rect2(544, 1358, 207, 60),
-	"reconectar": Rect2(761, 1358, 209, 60),
-	"teto_efeitos": Rect2(680, 1234, 290, 56),
+	"zerar": Rect2(110, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"zerar_stats": Rect2(327, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"zerar_ranking": Rect2(544, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"reconectar": Rect2(761, DADOS_APAGAR_Y + 70.0, 209, 60),
+	"teto_efeitos": Rect2(110, DADOS_RITMO_Y + 196.0, 400, 56),
+	# --- página SACO
+	"motor_ligado": Rect2(110, 400, 400, 64),
+	"motor_fim_curso": Rect2(570, 400, 400, 64),
+	"motor_desce": Rect2(110, 950, 275, 64),
+	"motor_sobe": Rect2(402, 950, 275, 64),
+	"motor_para": Rect2(695, 950, 275, 64),
+	"motor_destrava": Rect2(110, SACO_SOCORRO_Y + 66.0, 400, 60),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -171,9 +204,11 @@ const PAGINA_DO_CONTROLE := {
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 	"teto_efeitos": 3,
+	"motor_ligado": 4, "motor_fim_curso": 4, "curso_motor": 4, "pausa_motor": 4,
+	"motor_desce": 4, "motor_sobe": 4, "motor_para": 4, "motor_destrava": 4,
 }
 ## As abas, no topo da caixa.
-const ABA_LARGURA := 230.0
+const ABA_LARGURA := 184.0
 const ABA_RECT := Rect2(80, 250, 920, 62)
 
 var state: GameDef.State = GameDef.State.IDLE
@@ -315,6 +350,20 @@ const SOCOS_POR_RODADA := 2
 ## primeiro golpe. A nota já conquistada vale, mas a máquina não rearma
 ## uma segunda tentativa impossível.
 var rodada_encerrada_antecipadamente := false
+
+## ------------------------------------------------------------------
+## O MOTOR QUE BAIXA E LEVANTA O SACO.
+##
+## O jogo nunca liga o motor: ele diz ONDE o saco deve estar, e
+## `SacoMotor` cuida do resto — sem esperar, sem repetir e desistindo
+## quando a placa não responde. Ver `scripts/saco_motor.gd`, que é curto
+## de propósito: tudo o que pode ligar um motor cabe numa página.
+var saco := SacoMotor.new()
+
+## A FAXINA DAS FOTOS, correndo por fora do clique que a pediu.
+## Ver scripts/faxina.gd: apagar centenas de arquivos dentro do clique
+## congela a tela com a fila esperando.
+var faxina := Faxina.new()
 ## QUANTO O RESULTADO DE UM SOCO FICA À VISTA ANTES DE PEDIR O PRÓXIMO.
 ##
 ## Contado a partir do VEREDITO, não do golpe: o placar já subiu e o nome
@@ -902,6 +951,9 @@ func _process(delta: float) -> void:
 	# A gravação pendente sai assim que a anterior termina, e nunca no
 	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
 	SettingsStore.bombear()
+	# Algumas fotos por quadro, se houver faxina aberta. Sem faxina, não
+	# custa nada; com faxina, o jogo continua aceitando soco e START.
+	faxina.passo()
 	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
 	# O PASSO DO JOGO NÃO É MAIS O TEMPO CRU DO QUADRO.
@@ -1241,6 +1293,11 @@ func _armar_proximo_soco() -> void:
 ## sozinho: dois socos da mesma pessoa disputavam duas linhas da tabela,
 ## e a estatística contava duas partidas onde houve uma.
 func _fechar_rodada() -> void:
+	# E O SACO SOBE. A rodada acabou: os dois socos foram dados (ou a
+	# rodada foi encerrada), e daqui em diante a tela é placar e ranking.
+	# Subir agora deixa o motor terminar o curso enquanto o jogador lê a
+	# nota, em vez de fazer a próxima pessoa esperar por ele.
+	saco.quero(SacoMotor.Onde.EM_CIMA)
 	var melhor := 0
 	var melhor_v := 0.0
 	var simulado := false
@@ -1721,6 +1778,11 @@ func _iniciar_rodada() -> void:
 		credits -= 1
 		credito_gasto = true
 	rodada_encerrada_antecipadamente = false
+	# O SACO DESCE AGORA, no 3-2-1, e não no primeiro soco: o curso leva
+	# três segundos e meio, que é exatamente o tempo da contagem. Quem
+	# está na frente da máquina vê o saco baixando enquanto conta, e o
+	# movimento vira parte da abertura em vez de uma espera.
+	saco.quero(SacoMotor.Onde.EM_BAIXO)
 	_discard_round_photo()
 	intro_active = false
 	sons.stop("score_loop")
@@ -2507,6 +2569,23 @@ func _hora_de_procurar() -> bool:
 		return false
 	return animation_time - _busca_adiada_desde >= TETO_DA_ESPERA_DO_SOCO
 
+## O PASSO DO MOTOR, UMA VEZ POR QUADRO — e quase sempre sem dizer nada.
+##
+## `SacoMotor.passo()` devolve uma linha só quando há de fato algo novo a
+## pedir: o saco não está onde deveria, o pedido ainda vale e já passou o
+## intervalo mínimo desde a última vez. Na esmagadora maioria dos quadros
+## ele devolve vazio e isto custa uma comparação.
+##
+## E ele vem ANTES de tudo o mais no `_poll_serial` de propósito: se a
+## porta cair no meio de um curso, a placa desliga o motor sozinha pelo
+## tempo, e este lado apenas para de pedir.
+func _passo_do_motor() -> void:
+	if link == null or not link.is_open():
+		return
+	var linha := saco.passo()
+	if not linha.is_empty():
+		link.send_line(linha)
+
 func _tentar_conectar() -> void:
 	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
 	#
@@ -2651,6 +2730,7 @@ func _desistir_da_porta(motivo: String) -> void:
 func _poll_serial(_delta: float) -> void:
 	if link == null:
 		return
+	_passo_do_motor()
 	# O BATIMENTO VEM ANTES DE QUALQUER PERGUNTA, E É INCONDICIONAL.
 	#
 	# AQUI ESTAVA O DEFEITO QUE MATAVA A MÁQUINA PARA SEMPRE. Estava
@@ -2965,6 +3045,11 @@ func _on_serial_line(line: String) -> void:
 		"PINS":
 			pino_start = bool(msg["start"])
 			pino_credito = bool(msg["credit"])
+		"MOTOR":
+			# A PLACA É QUEM SABE ONDE O SACO ESTÁ. O jogo só pede; quem
+			# conta o curso, lê o fim de curso e desliga o motor é o
+			# firmware — inclusive se este programa fechar no meio.
+			saco.receber(msg)
 		"PONG":
 			if not porta_atual.is_empty() and not serial_status.begins_with("CONECTADO"):
 				serial_status = "CONECTADO %s" % porta_atual
@@ -3265,6 +3350,42 @@ func _enviar_config() -> void:
 		link.send_line(ArduinoProtocol.build_config(
 			sensor_eixo, sensor_raio, hit_min_speed, sensor_pulso_ms, hit_max_speed
 		))
+		# O AJUSTE DO MOTOR VIAJA JUNTO. Ele é do mesmo tipo de coisa que
+		# a largura da palheta: um número que o operador regula uma vez e
+		# a placa precisa conhecer. Mandar junto garante que a placa
+		# nunca fica com um curso antigo depois de uma reconexão.
+		link.send_line(ArduinoProtocol.build_motor_config(
+			saco.curso_ms, saco.pausa_ms, saco.fim_de_curso
+		))
+		link.send_line(ArduinoProtocol.build_motor("ESTADO"))
+
+## SÓ O AJUSTE DO MOTOR, sem arrastar junto a config do sensor.
+##
+## Mexer no tempo de curso não pode reenviar a calibração do golpe: a
+## placa reabre a janela de medida ao receber CONFIG, e fazer isso no
+## meio de uma partida perderia o soco de quem está batendo.
+func _mandar_config_do_motor() -> void:
+	if link != null and link.is_open():
+		link.send_line(ArduinoProtocol.build_motor_config(
+			saco.curso_ms, saco.pausa_ms, saco.fim_de_curso
+		))
+
+## O MANDO À MÃO, para montar a máquina e para o conserto.
+##
+## `SacoMotor` trabalha por INTENÇÃO — o jogo diz onde o saco deve
+## estar, não "liga o motor" —, e é isso que impede o laço infinito. O
+## botão da Central usa a mesma porta: ele muda a intenção, e o passo de
+## sempre é que fala com a placa. Não há um segundo caminho até o motor,
+## e por isso não há um segundo jeito de deixá-lo ligado.
+func _mando_do_motor(onde: int) -> void:
+	if not saco.ligado:
+		_show_notice("LIGUE O MOTOR NESTA PÁGINA ANTES")
+		return
+	if link == null or not link.is_open():
+		_show_notice("SEM PLACA — O MOTOR NÃO RESPONDE")
+		return
+	saco.quero(onde)
+	_show_notice("DESCENDO O SACO" if onde == SacoMotor.Onde.EM_BAIXO else "SUBINDO O SACO")
 
 ## Cada tentativa abre uma janela nova também na placa. Isto elimina estado
 ## residual do retorno da palheta e garante o mesmo caminho para soco 1 e 2.
@@ -3450,6 +3571,44 @@ func _click_central(p: Vector2) -> void:
 	elif _tocou("mapear_credito", p):
 		mapeando = "" if mapeando == "credito" else "credito"
 		return
+	elif _tocou("motor_ligado", p):
+		saco.ligado = not saco.ligado
+		if not saco.ligado:
+			# DESLIGAR TEM DE PARAR O MOTOR, e não só o jogo de falar com
+			# ele. Um motor descendo quando o operador desliga a função e
+			# vai embora é a correia no chão de manhã.
+			var freio := saco.parar()
+			if link != null and link.is_open() and not freio.is_empty():
+				link.send_line(freio)
+		_salvar()
+		_show_notice("MOTOR DO SACO LIGADO" if saco.ligado else "MOTOR DO SACO DESLIGADO")
+	elif _tocou("motor_fim_curso", p):
+		saco.fim_de_curso = not saco.fim_de_curso
+		_mandar_config_do_motor()
+		_salvar()
+		_show_notice(
+			"USANDO OS FINS DE CURSO" if saco.fim_de_curso
+			else "SÓ POR TEMPO — SEM FIM DE CURSO"
+		)
+	elif _tocou("motor_desce", p):
+		_mando_do_motor(SacoMotor.Onde.EM_BAIXO)
+	elif _tocou("motor_sobe", p):
+		_mando_do_motor(SacoMotor.Onde.EM_CIMA)
+	elif _tocou("motor_para", p):
+		# PARAR VALE MESMO COM A FUNÇÃO DESLIGADA e mesmo sem intenção
+		# aberta: é o botão de emergência da página, e um botão de
+		# emergência que às vezes não responde não é botão de emergência.
+		var freio := saco.parar()
+		if link != null and link.is_open() and not freio.is_empty():
+			link.send_line(freio)
+		_show_notice("MOTOR PARADO")
+	elif _tocou("motor_destrava", p):
+		# DESISTIU não é um defeito a esconder: é a placa não tendo
+		# confirmado o curso. Destravar é o operador dizendo "arrumei o
+		# fio, pode tentar de novo" — e sem isso a única saída seria
+		# fechar o jogo.
+		saco.destravar()
+		_show_notice("MOTOR LIBERADO PARA TENTAR DE NOVO")
 	elif _tocou("modo_livre", p):
 		game_mode = "free"
 	elif _tocou("modo_ficha", p):
@@ -3529,10 +3688,29 @@ func _click_central(p: Vector2) -> void:
 	elif _tocou("zerar_ranking", p):
 		if not _confirmar("ranking"):
 			return
-		RankingStore.clear_photos(ranking)
+		if faxina.rodando:
+			_show_notice("A FAXINA ANTERIOR AINDA ESTÁ CORRENDO")
+			return
+		# A ORDEM AQUI É O QUE IMPEDE O RESET DE QUEBRAR O JOGO.
+		#
+		# Primeiro a pasta é LIDA (as vinte da lista e todas as órfãs que
+		# ninguém apagava), depois a lista some e o arquivo é gravado, e
+		# só então os arquivos começam a sair — algumas por quadro, por
+		# fora deste clique.
+		#
+		# Gravar antes de apagar é deliberado: se a energia cair no meio
+		# da faxina, sobra foto órfã na pasta, que a próxima faxina leva.
+		# Ao contrário, sobraria um ranking apontando para fotos que não
+		# existem mais — e aí a tela de recordes quebra de verdade.
+		var fotos := RankingStore.listar_fotos()
 		ranking.clear()
 		_photo_cache.clear()
-		_show_notice("RANKING E FOTOS ZERADOS")
+		_salvar()
+		faxina.comecar(fotos)
+		_show_notice(
+			"RANKING ZERADO — APAGANDO %d FOTOS AO FUNDO" % fotos.size()
+			if fotos.size() > 0 else "RANKING ZERADO — NÃO HAVIA FOTOS"
+		)
 	elif _tocou("usar_min", p) or _tocou("usar_ref", p) or _tocou("usar_max", p):
 		# REGULAR A MÁQUINA COM UM SOCO E UM TOQUE.
 		#
@@ -3661,6 +3839,19 @@ func _ajustar(chave: String, direcao: int) -> void:
 			_girar_porta(direcao)
 		"raio":
 			sensor_raio = clampf(sensor_raio + direcao * 0.001, 0.005, 0.100)
+		# O TEMPO DE CURSO É O FREIO DE SEGURANÇA DO MOTOR, não um gosto.
+		#
+		# É ele que a placa usa para desligar sozinha quando o fim de
+		# curso não responde: passou do tempo, para. O teto de 15 s vem
+		# do firmware (MOTOR_CURSO_MAX_MS) e é repetido aqui porque um
+		# número maior na Central viraria uma promessa que a placa não
+		# cumpre — e o operador confiaria nela.
+		"curso_motor":
+			saco.curso_ms = clampi(saco.curso_ms + direcao * 250, 500, 15000)
+			_mandar_config_do_motor()
+		"pausa_motor":
+			saco.pausa_ms = clampi(saco.pausa_ms + direcao * 50, 100, 2000)
+			_mandar_config_do_motor()
 
 	_aplicar_faixas()
 
@@ -3724,6 +3915,7 @@ func _carregar() -> void:
 	if data.is_empty():
 		return
 	game_mode = str(data.get("mode", game_mode))
+	saco.carregar(data.get("saco_motor", {}))
 	credits = int(data.get("credits", credits))
 	plays = int(data.get("plays", plays))
 	# MIGRAÇÃO: instalações antigas guardavam um recorde só. Ele vira a
@@ -3836,6 +4028,7 @@ func _salvar() -> void:
 		"sensor_vmin": sensor_vmin,
 		"sensor_pulso_ms": sensor_pulso_ms,
 		"auto_escala": auto_escala.para_salvar(),
+		"saco_motor": saco.para_salvar(),
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
@@ -5041,6 +5234,16 @@ func _draw_central() -> void:
 	var caixa := Rect2(40, 96, 1000, 1790)
 	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
 	_placa(caixa.grow(-5.0), 19.0, CENTRAL_FUNDO)
+	# A AUDITORIA COMEÇA AQUI, e não antes.
+	#
+	# Tudo o que foi desenhado até esta linha está ATRÁS de um painel
+	# opaco — o letreiro da abertura, o placar, o ringue. Contar aquilo
+	# como "texto que tapa outro texto" seria acusar a tela de um defeito
+	# que ninguém vê: o painel já cobriu. A auditoria mede o que está por
+	# cima dele, que é o que o operador lê.
+	if auditoria_de_layout:
+		auditoria.clear()
+		_auditando_o_miolo = true
 
 	# ---- O MIOLO, deslocado pela rolagem.
 	#
@@ -5057,9 +5260,12 @@ func _draw_central() -> void:
 			_central_camera()
 		3:
 			_central_dados()
+		4:
+			_central_maquina()
 		_:
 			_central_operacao()
 	draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+	_auditando_o_miolo = false
 
 	# ---- As faixas paradas, cobrindo o que a página passou por baixo.
 	draw_rect(Rect2(45, 101, 990, CENTRAL_TOPO - 101.0), CENTRAL_FUNDO)
@@ -5102,10 +5308,13 @@ func _abas_da_central() -> void:
 		)
 		var atual := i == central_pagina
 		_cartao(r, Paleta.AMBAR if atual else Color("330c16"), Paleta.CARTAO_BORDA, 1.0, 2.0)
-		_texto(
+		# `_texto_cabendo`, e não `_texto`: com cinco abas em 920 px o
+		# rótulo mais longo não cabe em corpo 20, e letra transbordando
+		# a aba ao lado é exatamente o que esta revisão foi caçar.
+		_texto_cabendo(
 			str(PAGINAS[i]), r.position.y + 40.0, 20,
 			Color("2b0a13") if atual else Paleta.TINTA_FRACA,
-			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+			r.size.x - 16.0, r.position.x + 8.0
 		)
 
 # ---------------------------------------------------------- OPERAÇÃO
@@ -5297,7 +5506,12 @@ func _central_golpe() -> void:
 	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
 	# dentro disso.
 	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
-	var caixa_pulso := Rect2(570, 1586, 400, LADO_BOTAO)
+	# OS DOIS SUBIRAM VINTE PIXELS. A legenda "LARGURA DA PALHETA" e a
+	# frase que confere a janela do sensor estavam na mesma faixa de
+	# altura, uma centrada na coluna da esquerda e a outra na largura
+	# inteira: elas se cruzavam no meio. Subindo o par de visores, a
+	# frase ganha a linha inteira para ela.
+	var caixa_pulso := Rect2(570, 1566, 400, LADO_BOTAO)
 	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
 	_texto(
 		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
@@ -5440,10 +5654,14 @@ func _central_camera() -> void:
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
+	# DUAS FRASES, DUAS LINHAS. As duas eram desenhadas na MESMA linha de
+	# base — uma centrada e a outra à esquerda —, então elas se cruzavam
+	# no meio da tela e ninguém conseguia ler nenhuma das duas. É o tipo
+	# de defeito que passa despercebido enquanto as duas estão curtas.
 	_texto(cam_status, 806.0, 16, Paleta.TINTA_FRACA)
 	if camera_service != null:
 		_texto(
-			camera_service.ficha_da_ponte(), 806.0, 16, Paleta.CIANO,
+			camera_service.ficha_da_ponte(), 840.0, 16, Paleta.CIANO,
 			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
 	# ---- o relatório, na tela, e não numa janela que abre atrás do jogo
@@ -5485,13 +5703,18 @@ func _central_camera() -> void:
 			"Captura nativa do Windows por Media Foundation — sem Python e sem OpenCV.",
 			1018.0, 15, Paleta.CIANO
 		)
+		# TRINTA E QUATRO PIXELS ENTRE LINHAS, e não vinte e quatro. O
+		# piso de corpo de letra subiu para 20 quando a tipografia foi
+		# unificada, e estas três linhas continuaram com o espaçamento de
+		# quando o corpo era 15: cada uma invadia a de baixo por oito
+		# pixels, e o texto de ajuda da câmera virou um borrão.
 		_texto(
 			"Conecte a câmera USB: o jogo reconhece, mantém o vídeo ao vivo e só congela a foto.",
-			1042.0, 15, Paleta.TINTA_FRACA
+			1052.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
 			"DIAGNOSTICAR só consulta. RESOLVER ACESSO libera a privacidade do usuário.",
-			1066.0, 15, Paleta.TINTA_FRACA
+			1086.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
 		for i in range(medico.linhas.size()):
@@ -5518,7 +5741,11 @@ func _central_camera() -> void:
 # ------------------------------------------------------------- DADOS
 func _central_dados() -> void:
 	_secao(Rect2(80, 350, 920, 220), "MELHORES DA CASA", Paleta.VERMELHO)
-	_lista_do_ranking(Rect2(110, 410, 860, 42))
+	# O CARTÃO TINHA 42 PX e guardava duas linhas de texto que somam 74.
+	# A nota era desenhada com a linha de base ABAIXO da borda de baixo do
+	# cartão, por cima da colocação — "1º" e "9999" no mesmo pixel nas
+	# cinco células. Medido pela auditoria de layout, não por acaso.
+	_lista_do_ranking(Rect2(110, 410, 860, 74))
 	var resumo := StatisticsStore.summary(statistics)
 	_texto(
 		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
@@ -5536,15 +5763,28 @@ func _central_dados() -> void:
 	# exatamente por que o diagnóstico saía DIFERENTE em cada PC, com a
 	# mesma placa e o mesmo jogo. Quem lê a tela para contar ao telefone
 	# o que está escrito estava lendo duas frases embaralhadas.
-	_secao(Rect2(80, 600, 920, 470), "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
-	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
-	_texto(
-		telemetria if telemetria != "" else "sem telemetria ainda",
-		692.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	_texto(
+	# A CENTRAL DEIXOU DE TRAZER O `y` DE CADA LINHA ESCRITO À MÃO.
+	#
+	# Enquanto trouxe, esta página escondia cinco sobreposições de uma vez
+	# — e a pior delas era invisível para quem só olhava o código: as
+	# quatro linhas do RITMO eram desenhadas em 1152…1242, ACIMA da
+	# moldura que as devia conter (1186). Alguém mexeu na moldura, as
+	# linhas ficaram onde estavam, e a seção passou a escrever por cima da
+	# seção de cima. Nenhuma das duas frases some — elas se misturam, e
+	# qual fica por cima muda com a fonte e a escala da TV. É por isso que
+	# o diagnóstico saía DIFERENTE em cada PC com a mesma placa.
+	#
+	# Agora a linha seguinte nasce da anterior (`_linha`) e a moldura
+	# nasce da contagem (`_altura_da_pilha`). Não sobrou número para
+	# errar, e o teste tests/test_central_legivel.gd mede o resultado.
+	var caixa_diag := Rect2(80, DADOS_DIAG_Y, 920, _altura_da_pilha(15))
+	_secao(caixa_diag, "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
+	_pilha(caixa_diag)
+	_linha(serial_status, 16, Paleta.TINTA_FRACA)
+	_linha(telemetria if telemetria != "" else "sem telemetria ainda", 15, Paleta.TINTA_LEVE)
+	_linha(
 		"Zero Delay:  START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
-		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# APERTE O BOTÃO E OLHE ESTES DOIS NÚMEROS.
 	#
@@ -5554,24 +5794,20 @@ func _central_dados() -> void:
 	# jogo ignorando. Estas duas linhas separam as quatro em dez segundos:
 	# pino que não muda é problema ANTES do firmware, e aí não adianta
 	# mexer em código.
-	_texto(
+	_linha(
 		"pinos agora:  D2 START %s  •  D3 CRÉDITO %s" % [
 			"APERTADO" if pino_start else "solto",
 			"APERTADO" if pino_credito else "solto",
 		],
-		748.0, 17,
-		Paleta.VERDE if (pino_start or pino_credito) else Paleta.TINTA_LEVE,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if (pino_start or pino_credito) else Paleta.TINTA_LEVE
 	)
-	_texto(
+	_linha(
 		"Arduino (D2/D3):  START %d apertos  •  CRÉDITO %d apertos" % [serial_start, serial_credito],
-		776.0, 17,
-		Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE
 	)
-	_texto(
+	_linha(
 		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
-		832.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# POR ONDE O JOGO ESTÁ FALANDO COM A PLACA.
 	#
@@ -5582,59 +5818,47 @@ func _central_dados() -> void:
 	var recado_serial := link.descricao() if tem_serial else "NENHUM"
 	if link != null and not link.motivo_da_falta().is_empty():
 		recado_serial += " — %s" % link.motivo_da_falta()
-	_texto(
+	_linha(
 		"caminho até a placa: %s" % recado_serial,
-		860.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if tem_serial else Paleta.VERMELHO
 	)
 	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
 	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
 	# travar sem sensor — e é justamente essa separação que diz ao técnico
 	# se ele deve olhar o cabo USB ou os fios do I2C.
 	var sensor_online := _sensor_ligado()
-	_texto(
+	_linha(
 		"sensor óptico: %s" % (
 			"PRONTO — sinal atual" if sensor_online
 			else ("SEM SINAL RECENTE — reconectando" if sensor_presente
 			else "NÃO ENCONTRADO — confira D0=D4, A0=A0, VCC e GND")
 		),
-		888.0, 17, Paleta.VERDE if sensor_online else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if sensor_online else Paleta.AMBAR
 	)
-	# A TERCEIRA PERGUNTA, QUE FALTAVA: O SENSOR ESTÁ PRONTO PARA ACEITAR?
-	#
-	# "Porta aberta", "placa identificada" e "sensor presente" já eram
-	# estados distintos aqui. Faltava o quarto, e é o que estava matando a
-	# máquina em silêncio: a placa só aceita um soco depois de ver a
-	# montagem PARADA por 200 ms seguidos. Numa montagem que vibra — caixa
-	# de som dentro do gabinete, ventilador, salão cheio — essa autorização
-	# pode nunca acender, e aí nenhum golpe é aceito, nunca, sem nada na
-	# tela dizendo por quê.
-	#
-	# Se esta linha ficar VERMELHA com a máquina parada, é esta a resposta
-	# inteira: recalibre (a calibração mede o ruído desta montagem) ou veja
-	# o que está vibrando.
 	# O NÚMERO QUE RESPONDE "O SENSOR ESTÁ VIVO?" SEM INTERPRETAR NADA.
 	#
 	# Parado, perto de 0,00. Batendo no alvo, passa de 3. Se o MAIOR
 	# nunca sobe quando alguém soca, o problema está antes do jogo — é
 	# sensor ou fio, e nenhuma regulagem aqui resolve.
-	_texto(
+	_linha(
 		"força agora: %.2f g   •   maior já visto: %.2f g   •   conta acima de %.2f g" % [
 			sensor_forca, sensor_forca_maxima, sensor_gatilho
 		],
-		916.0, 17,
-		Paleta.VERDE if sensor_forca_maxima >= sensor_gatilho and sensor_gatilho > 0.0 else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17,
+		Paleta.VERDE if sensor_forca_maxima >= sensor_gatilho and sensor_gatilho > 0.0 else Paleta.AMBAR
 	)
 	# A ÚLTIMA RECUSA, COM OS NÚMEROS DO EVENTO. É o que diz QUAL limiar
 	# está errado nesta montagem, em vez de deixar adivinhar um por vez.
-	if not ultima_recusa.is_empty():
-		_texto(
-			"última recusa: %s" % ultima_recusa,
-			944.0, 15, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-		)
-
+	#
+	# A linha aparece SEMPRE, mesmo sem recusa nenhuma. Aparecer só às
+	# vezes fazia a moldura e todas as linhas abaixo dela subirem e
+	# descerem 34 px sozinhas, na frente do técnico, no instante em que
+	# ele lê — e uma tela que se mexe enquanto se lê é uma tela em que não
+	# se confia.
+	_linha(
+		"última recusa: %s" % (ultima_recusa if not ultima_recusa.is_empty() else "nenhuma nesta sessão"),
+		15, Paleta.AMBAR if not ultima_recusa.is_empty() else Paleta.TINTA_LEVE
+	)
 	# A EXTENSÃO NATIVA CARREGOU? A PERGUNTA QUE FALTAVA, e a que explica
 	# o "funciona no meu PC" inteiro.
 	#
@@ -5651,13 +5875,12 @@ func _central_dados() -> void:
 	# entre "esta máquina está usando o plano B" e "esta máquina está
 	# quebrada".
 	var nativa_ok := ClassDB.class_exists(&"GdSerialManager")
-	_texto(
+	_linha(
 		"extensão nativa: %s" % (
 			"carregada" if nativa_ok
-			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++ 2015-2022"
+			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++"
 		),
-		916.0, 15, Paleta.VERDE if nativa_ok else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.VERDE if nativa_ok else Paleta.AMBAR
 	)
 	# O ANDAMENTO DA BUSCA, EM NÚMEROS.
 	#
@@ -5665,12 +5888,12 @@ func _central_dados() -> void:
 	# procurando ou travada — e essa dúvida sozinha já custou noites de
 	# gabinete. O número da volta subindo é a prova de que a busca está
 	# viva, e é o que se lê ao telefone.
-	_texto(
+	_linha(
 		"busca: volta %d  •  porta %d de %d  •  varredura cega %s" % [
 			_varreduras + 1, _porta_da_vez, _fila_de_portas.size(),
 			"LIGADA" if _cega_liberada else "desligada",
 		],
-		944.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# O QUE JÁ DEU ERRADO NESTA SESSÃO. Ponte religando sem parar é cabo
 	# ruim, antivírus ou PowerShell bloqueado; caminho trocando sem parar
@@ -5678,18 +5901,14 @@ func _central_dados() -> void:
 	var religadas_da_ponte := 0
 	if link is PonteProcessoLink:
 		religadas_da_ponte = (link as PonteProcessoLink).religadas()
-	_texto(
-		"ponte religada %d ×  •  caminho trocado %d ×" % [
-			religadas_da_ponte, _trocas_de_caminho
-		],
-		972.0, 15,
-		Paleta.TINTA_LEVE if (religadas_da_ponte + _trocas_de_caminho) < 4 else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	_linha(
+		"ponte religada %d ×  •  caminho trocado %d ×" % [religadas_da_ponte, _trocas_de_caminho],
+		15, Paleta.TINTA_LEVE if (religadas_da_ponte + _trocas_de_caminho) < 4 else Paleta.AMBAR
 	)
 	# A PORTA FIXADA, E QUANTO CRÉDITO AINDA RESTA A ELA. Fixar uma porta
 	# errada era o jeito mais fácil de matar a máquina, e não havia como
 	# ver isso em lugar nenhum.
-	_texto(
+	_linha(
 		"porta escolhida: %s" % (
 			"automática (varre todas)" if porta_configurada.is_empty()
 			else "%s — %d falha(s); %s" % [
@@ -5698,13 +5917,11 @@ func _central_dados() -> void:
 				else "liberada, varrendo todas"
 			]
 		),
-		1000.0, 15,
-		Paleta.TINTA_LEVE if porta_configurada.is_empty() else Paleta.CIANO,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE if porta_configurada.is_empty() else Paleta.CIANO
 	)
-	_texto(
+	_linha(
 		"sistema: %s  •  velocidade %d bauds" % [OS.get_name(), GameDef.SERIAL_BAUD],
-		1028.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE
@@ -5714,21 +5931,23 @@ func _central_dados() -> void:
 	# outro vídeo, outra TV, outra resolução. Sem número, o conserto vira
 	# palpite. Estas quatro linhas são o número — e é o que se manda para
 	# quem for consertar, em vez de "está travado".
-	_secao(Rect2(80, 1090, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
+	var caixa_ritmo := Rect2(80, DADOS_RITMO_Y, 920, _altura_da_pilha(4) + 76.0)
+	_secao(caixa_ritmo, "RITMO DA MÁQUINA", Paleta.VERDE)
+	_pilha(caixa_ritmo)
 	var fps := desempenho.fps()
 	var cor_fps := Paleta.VERDE if fps >= 55.0 else (Paleta.AMBAR if fps >= 40.0 else Paleta.VERMELHO)
-	_texto(
+	_linha(
 		"%.0f quadros por segundo  •  pior quadro %.1f ms  •  efeitos em %d%%" % [
 			fps, desempenho.pior_ms(), int(round(desempenho.qualidade * 100.0))
 		],
-		1152.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		20, cor_fps
 	)
-	_texto(
+	_linha(
 		"%d chamadas de desenho  •  %d primitivas por quadro" % [
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
 		],
-		1182.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.TINTA_LEVE
 	)
 	# A ESCALA DENUNCIA A TELA DEITADA.
 	#
@@ -5737,17 +5956,16 @@ func _central_dados() -> void:
 	# fica com metade dos pixels e a máquina parece de baixa qualidade
 	# sem nada estar errado no jogo. Escala 1,00 é a TV girada certo.
 	var escala := get_window().get_final_transform().get_scale()
-	var aviso := "" if absf(escala.y - 1.0) < 0.02 else "  ← GIRE A TELA NO WINDOWS PARA 1080x1920"
-	_texto(
+	var aviso := "" if absf(escala.y - 1.0) < 0.02 else "  ← GIRE A TELA PARA 1080x1920"
+	_linha(
 		"janela %dx%d  •  escala %.2f%s" % [
 			DisplayServer.window_get_size().x, DisplayServer.window_get_size().y, escala.y, aviso
 		],
-		1212.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR
 	)
-	_texto(
+	_linha(
 		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
-		1242.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.CIANO
 	)
 	# O TETO À MÃO, para quando o automático errar. Ele acerta na maioria
 	# das máquinas e erra em duas: num PC que oscila, ficando subindo e
@@ -5758,11 +5976,194 @@ func _central_dados() -> void:
 		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
-	_secao(Rect2(80, 1304, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	# APAGAR MOSTRA O QUE ESTÁ FAZENDO.
+	#
+	# O clique sumia com o ranking e devolvia a tela; as fotos saíam de
+	# fininho (ou nem saíam). Sem número na tela, "apagou tudo?" só tinha
+	# uma resposta possível: abrir a pasta pelo Windows. Agora a linha e
+	# a barra contam a faxina inteira, e continuam contando se o operador
+	# sair da Central e voltar.
+	_secao(Rect2(80, DADOS_APAGAR_Y, 920, 218), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
+	_botao(
+		BOTOES_SIMPLES["zerar_ranking"],
+		"APAGANDO…" if faxina.rodando else "RANKING + FOTOS",
+		false, Paleta.VERMELHO, 13, faxina.rodando
+	)
 	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+	var base_faxina := DADOS_APAGAR_Y + 166.0
+	_andamento(
+		Rect2(110, base_faxina - 16.0, 860, 10), faxina.progresso(),
+		Paleta.AMBAR if faxina.rodando else Paleta.VERDE
+	)
+	_texto(
+		faxina.ficha() if faxina.total > 0 else "a pasta guarda a foto de quem já saiu do ranking; o RANKING + FOTOS leva todas",
+		base_faxina + 24.0, 15,
+		Paleta.AMBAR if faxina.rodando else Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+## UMA PILHA DE LINHAS DENTRO DE UMA SEÇÃO DA CENTRAL.
+##
+## Enquanto cada linha trouxe o seu `y` escrito à mão, esta tela escondeu
+## sobreposições que ninguém via lendo o código: duas frases na mesma
+## linha de base desenham UMA POR CIMA DA OUTRA, e qual delas fica por
+## cima muda com a fonte e a escala da TV. O técnico lê duas frases
+## embaralhadas e não tem como desconfiar da tela.
+##
+## Com a pilha, a linha seguinte nasce da anterior e a moldura nasce da
+## contagem. `tests/test_central_legivel.gd` mede o resultado desenhando
+## a Central de verdade e cruzando os retângulos de cada texto.
+const PILHA_PASSO := 34.0    # de uma linha de base à seguinte
+const PILHA_TOPO := 40.0     # do topo da moldura até o título da seção
+const PILHA_RODAPE := 20.0   # da última linha até o fim da moldura
+
+## Altura de uma moldura que vai guardar `linhas` linhas além do título.
+func _altura_da_pilha(linhas: int, extra := 0.0) -> float:
+	return PILHA_TOPO + PILHA_PASSO * float(linhas) + PILHA_RODAPE + extra
+
+var _pilha_y := 0.0
+
+## Abre a pilha no título da seção; a primeira `_linha` cai logo abaixo.
+func _pilha(rect: Rect2) -> void:
+	_pilha_y = rect.position.y + PILHA_TOPO
+
+## Mais uma linha da pilha. Devolve a linha de base usada.
+func _linha(texto: String, tamanho: int, cor: Color) -> float:
+	_pilha_y += PILHA_PASSO
+	_texto(texto, _pilha_y, tamanho, cor, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+	return _pilha_y
+
+# ------------------------------------------------------- SACO E MOTOR
+## A PÁGINA DO MOTOR QUE BAIXA E LEVANTA O SACO.
+##
+## Ela existe porque um motor não é um LED. Um LED aceso por engano é um
+## LED aceso; um motor ligado por engano é uma correia arrebentada, um
+## saco no chão ou um fim de curso destruído — e isso acontece longe de
+## quem programou, numa festa, às onze da noite, com o operador olhando
+## uma tela que não conta nada.
+##
+## Então esta página conta tudo: se a função está ligada, onde o saco
+## está AGORA, quanto falta do curso em uma barra que anda, o que a
+## placa respondeu por último, e os três botões de mando à mão para quem
+## está montando a máquina. O botão PARAR responde sempre, inclusive com
+## a função desligada.
+func _central_maquina() -> void:
+	# ---- LIGAR, E DIZER O QUE ISSO MUDA
+	_secao(Rect2(80, 350, 920, 200), "MOTOR DO SACO", Paleta.ROXO)
+	_botao(
+		BOTOES_SIMPLES["motor_ligado"],
+		"LIGADO" if saco.ligado else "DESLIGADO",
+		saco.ligado, Paleta.VERDE if saco.ligado else Paleta.TINTA_FRACA, 22
+	)
+	# O FIM DE CURSO É UMA ESCOLHA DE MONTAGEM, não um gosto.
+	#
+	# Com as duas chaves instaladas, a placa para no instante em que o
+	# saco chega — é o certo. Sem elas (montagem mais simples, ou uma
+	# chave que quebrou no meio da festa), sobra o tempo de curso, e a
+	# máquina continua funcionando enquanto a peça não chega.
+	_botao(
+		BOTOES_SIMPLES["motor_fim_curso"],
+		"FINS DE CURSO: SIM" if saco.fim_de_curso else "FINS DE CURSO: NÃO",
+		saco.fim_de_curso, Paleta.CIANO, 18
+	)
+	_texto(
+		"O saco desce no START e sobe quando os dois socos terminam. Sem motor, o jogo é exatamente o mesmo.",
+		522.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- OS DOIS NÚMEROS QUE A PLACA PRECISA CONHECER
+	_secao(Rect2(80, 590, 920, 266), "TEMPOS DO CURSO", Paleta.AMBAR)
+	_stepper("curso_motor", "%.1f s" % (saco.curso_ms / 1000.0), "TEMPO DE CURSO", Paleta.AMBAR)
+	_stepper("pausa_motor", "%d ms" % saco.pausa_ms, "PAUSA AO INVERTER", Paleta.CIANO)
+	# ESTE É O FREIO DE SEGURANÇA, e o técnico precisa ler isso na tela.
+	# Quem regula um "tempo" sem saber que ele DESLIGA o motor o encurta
+	# achando que está acelerando a descida — e passa a ter um saco que
+	# para no meio do caminho toda vez.
+	_texto(
+		"Passado o tempo de curso, a placa DESLIGA o motor sozinha, mesmo sem fim de curso.",
+		826.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- MANDAR À MÃO, PARA MONTAR E PARA CONSERTAR
+	_secao(Rect2(80, 890, 920, 190), "MANDO À MÃO", Paleta.CIANO)
+	var pode := saco.ligado and link != null and link.is_open()
+	_botao(BOTOES_SIMPLES["motor_desce"], "DESCER", false, Paleta.CIANO, 20, not pode)
+	_botao(BOTOES_SIMPLES["motor_sobe"], "SUBIR", false, Paleta.CIANO, 20, not pode)
+	# PARAR NUNCA FICA DESBOTADO. É o botão de emergência da página, e um
+	# botão de emergência que às vezes não responde não é botão de
+	# emergência — ele vale com a função desligada e sem curso em
+	# andamento.
+	_botao(BOTOES_SIMPLES["motor_para"], "PARAR", false, Paleta.VERMELHO, 20)
+	_texto(
+		"Use com o gabinete aberto para acertar a altura do saco e conferir os fins de curso.",
+		1052.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	# ---- O QUE ESTÁ ACONTECENDO AGORA
+	var caixa_estado := Rect2(80, SACO_ESTADO_Y, 920, SACO_ESTADO_H)
+	_secao(caixa_estado, "ONDE O SACO ESTÁ", Paleta.VERDE)
+	var cor_estado := Paleta.TINTA_LEVE
+	if saco.desistiu():
+		cor_estado = Paleta.VERMELHO
+	elif saco.andando():
+		cor_estado = Paleta.AMBAR
+	elif saco.ligado:
+		cor_estado = Paleta.VERDE
+	# A BARRA ANDA DE VERDADE: ela vem do `resta_ms` que a própria placa
+	# manda a cada relatório, não de um relógio daqui. Uma barra animada
+	# por conta própria continuaria andando com o cabo arrancado, e é
+	# justamente aí que ela precisa parar.
+	# A BARRA CHEIA SÓ QUANDO O SACO ESTÁ ONDE SE SABE QUE ELE ESTÁ.
+	#
+	# `progresso()` devolve 1 com o motor parado, o que é certo para o
+	# fim de um curso e MENTIRA com a função desligada: uma barra cheia
+	# embaixo de "MOTOR DESLIGADO" se lê como "pronto, chegou", quando o
+	# jogo não faz ideia de onde o saco está.
+	var quanto := 0.0
+	if saco.andando():
+		quanto = saco.progresso()
+	elif saco.ligado and saco.posicao != ArduinoProtocol.POS_DESCONHECIDA:
+		quanto = 1.0
+	_andamento(Rect2(110, 1176, 860, 12), quanto, cor_estado)
+	_pilha(caixa_estado)
+	_pilha_y += 34.0
+	_linha(saco.ficha(), 20, cor_estado)
+	_linha(
+		"placa diz: %s  •  %s" % [
+			ArduinoProtocol.nome_do_estado(saco.estado),
+			ArduinoProtocol.nome_da_posicao(saco.posicao),
+		],
+		16, Paleta.TINTA_LEVE
+	)
+	_linha(
+		"resta do curso: %d ms  •  curso ajustado: %d ms" % [saco.resta_ms, saco.curso_ms],
+		15, Paleta.TINTA_LEVE
+	)
+	_linha(
+		"caminho até a placa: %s" % (
+			link.descricao() if link != null and link.is_open() else "NENHUM — o motor não responde"
+		),
+		15, Paleta.VERDE if link != null and link.is_open() else Paleta.VERMELHO
+	)
+
+	# ---- QUANDO A PLACA NÃO CONFIRMA
+	#
+	# `SacoMotor` desiste depois de um tempo sem confirmação, de
+	# propósito: insistir para sempre É o laço infinito com outro nome, e
+	# foi exatamente o que se pediu para não existir aqui. Desistir, por
+	# outro lado, não pode ser definitivo — senão um fio que alguém
+	# reencaixa em dez segundos deixa o saco parado até alguém fechar o
+	# jogo.
+	_secao(Rect2(80, SACO_SOCORRO_Y, 920, 176), "SE O MOTOR NÃO RESPONDER", Paleta.VERMELHO)
+	_botao(BOTOES_SIMPLES["motor_destrava"], "TENTAR DE NOVO", false, Paleta.AMBAR, 18, not saco.desistiu())
+	_texto(
+		"O jogo desiste depois de %.0f s sem confirmação, em vez de insistir para sempre." % (
+			SacoMotor.FOLGA_DA_CONFIRMACAO_MS / 1000.0
+		),
+		SACO_SOCORRO_Y + 158.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
 
 ## Os índices achados, em uma linha. Escrito à mão porque um `map` com
 ## lambda aqui não deixa o GDScript inferir o tipo, e tipo inferido é o
@@ -5841,9 +6242,9 @@ func _lista_do_ranking(rect: Rect2) -> void:
 		var cor := _cor_da_posicao(i + 1)
 		var tem := i < ranking.size()
 		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
-		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
+		_texto("%dº" % (i + 1), celula.position.y + 26.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
 		_texto(
-			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
+			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 62.0, 22,
 			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
 			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
 		)
@@ -5899,17 +6300,29 @@ func _seletor_porta_refinado() -> void:
 		draw_arc(centro, 9.0, inicio, inicio + 1.75, 16, Color(cor, 0.82), 1.2, true)
 
 	var porta := porta_configurada if not porta_configurada.is_empty() else "AUTO"
-	_texto_cabendo(porta, visor.position.y + 39.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
-	_texto(
-		"BUSCA AUTOMÁTICA" if porta_configurada.is_empty() else "PORTA PREFERENCIAL",
-		visor.position.y + 55.0, 10, Color(cor, 0.80),
-		HORIZONTAL_ALIGNMENT_CENTER, visor.position.x + 42.0, visor.size.x - 52.0
-	)
+	# O NOME DA PORTA E A LEGENDA DIVIDIAM UM VISOR DE 64 PX, a 16 px um
+	# do outro, com o nome em corpo 25: a legenda entrava pela barriga
+	# das letras de cima e nenhuma das duas se lia. Não era questão de
+	# afastar mais — as duas linhas não cabem nessa altura, e insistir
+	# nisso só trocaria a sobreposição por um rodapé colado na borda.
+	#
+	# A legenda desceu para a linha de ajuda, onde havia espaço e onde
+	# ela ainda diz o que precisa dizer. O visor ficou com o nome da
+	# porta, centrado, que é o que se lê de longe.
+	#
+	# Só apareceu quando a auditoria passou a enxergar `_texto_cabendo`:
+	# até então, todo rótulo de botão e todo valor de visor eram um ponto
+	# cego do teste.
+	_texto_cabendo(porta, visor.position.y + 43.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
 
 	draw_circle(Vector2(126.0, 1431.0), 4.0, cor, true, -1.0, true)
 	_texto_cabendo(serial_status, 1437.0, 14, Paleta.para_texto(cor), 822.0, 140.0)
 	_texto(
-		"O jogo continua aberto e reconecta sozinho",
+		(
+			"BUSCA AUTOMÁTICA — o jogo continua aberto e reconecta sozinho"
+			if porta_configurada.is_empty()
+			else "PORTA PREFERENCIAL — o jogo continua aberto e reconecta sozinho"
+		),
 		r.end.y + 27.0, 13, Paleta.TINTA_FRACA,
 		HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
 	)
@@ -6153,6 +6566,17 @@ func _draw_alertas_graves() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
 		)
 
+## UMA BARRA DE ANDAMENTO. `quanto` vai de 0 a 1.
+##
+## Existe porque "está fazendo alguma coisa" e "travou" são a mesma
+## imagem numa tela parada — e a diferença entre as duas é o que decide
+## se o operador espera ou desliga a máquina no botão.
+func _andamento(rect: Rect2, quanto: float, accent: Color) -> void:
+	_cartao(rect, Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
+	var cheio := clampf(quanto, 0.0, 1.0) * rect.size.x
+	if cheio > 1.0:
+		draw_rect(Rect2(rect.position, Vector2(cheio, rect.size.y)), accent)
+
 ## A peça padrão da tela: retângulo branco com sombra e borda. Todo painel
 ## do jogo passa por aqui, então a "altura" das peças é a mesma em toda
 ## parte — e mudar a sombra do jogo inteiro é mudar uma função.
@@ -6165,12 +6589,20 @@ func _cartao(rect: Rect2, fundo_c: Color, borda: Color, alpha := 1.0, largura_bo
 ## Botão: colorido e cheio quando ativo, branco com borda colorida quando
 ## não. Num tema claro é o PREENCHIMENTO que marca o estado ligado —
 ## borda mais grossa sozinha não se lê de longe.
-func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int) -> void:
-	var fundo_c := accent if ativo else Paleta.CARTAO
-	var tinta := Paleta.CARTAO if ativo else Paleta.para_texto(accent)
+##
+## `desligado` desbota o botão enquanto ele não aceita clique. Um botão
+## que não responde precisa PARECER que não responde: se continuar com a
+## cara de sempre, o operador clica de novo, e de novo, e conclui que a
+## máquina travou — bem na hora em que ela está trabalhando.
+func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int, desligado := false) -> void:
+	var cor := Paleta.tinta_clara(accent, 0.45) if desligado else accent
+	var fundo_c := cor if ativo else Paleta.CARTAO
+	var tinta := Paleta.CARTAO if ativo else Paleta.para_texto(cor)
+	if desligado:
+		tinta = Paleta.TINTA_LEVE
 	draw_rect(Rect2(rect.position + Vector2(0, 3.0), rect.size), Paleta.SOMBRA)
 	draw_rect(rect, fundo_c)
-	draw_rect(rect, Color(accent, 0.9), false, 2.0)
+	draw_rect(rect, Color(cor, 0.9), false, 2.0)
 	_texto_cabendo(
 		texto, rect.position.y + rect.size.y * 0.68, tamanho, tinta,
 		rect.size.x - 20.0, rect.position.x + 10.0
@@ -6199,11 +6631,66 @@ func _icone(nome: String, centro: Vector2, raio: float, cor: Color) -> void:
 ## Todo texto da tela passa por aqui. `y` é a LINHA DE BASE, que é como o
 ## Godot desenha — e é por isso que as bandas do topo do arquivo falam em
 ## linha de base e não em topo de caixa.
+## ------------------------------------------------------------------
+## A AUDITORIA DE LAYOUT.
+##
+## "Nenhum texto pode tapar o outro" não é uma regra que se cumpre
+## olhando: são quatro páginas de Central, dezenas de rótulos, e basta
+## alguém acrescentar uma linha para empurrar outra por baixo de um
+## cartão. Já aconteceu duas vezes neste arquivo, e nas duas o defeito só
+## apareceu numa foto da tela.
+##
+## Ligando esta bandeira, todo texto desenhado registra o RETÂNGULO que
+## ocupa de fato — largura medida na fonte, altura do topo da maiúscula à
+## barriga da minúscula. `tests/test_central_legivel.gd` percorre as
+## páginas, liga isto e falha se dois retângulos se cruzarem.
+##
+## Ela fica DESLIGADA no jogo e não custa nada: uma comparação por texto.
+var auditoria_de_layout := false
+## Liga enquanto o MIOLO que rola está sendo desenhado. O cabeçalho e o
+## rodapé da Central são repintados opacos por cima dele: uma linha que
+## caia fora da janela não é lida por ninguém, e acusá-la seria apontar
+## um defeito que não existe — ao mesmo tempo em que os botões do rodapé,
+## esses sim sempre visíveis, precisam continuar sendo medidos.
+var _auditando_o_miolo := false
+var auditoria: Array[Dictionary] = []
+
+func _anotar_texto(
+	texto: String, y: float, corpo: int, alinhamento: int, x: float, largura: float
+) -> void:
+	if texto.strip_edges().is_empty():
+		return
+	var medida := fonte_texto.get_string_size(texto, alinhamento, largura, corpo)
+	var esquerda := x
+	if alinhamento == HORIZONTAL_ALIGNMENT_CENTER:
+		esquerda = x + (largura - medida.x) * 0.5
+	elif alinhamento == HORIZONTAL_ALIGNMENT_RIGHT:
+		esquerda = x + largura - medida.x
+	# `y` é a LINHA DE BASE, e não o topo: o retângulo sobe pelo ascendente
+	# e desce pelo descendente. Tratar `y` como topo — o erro natural —
+	# daria uma caixa deslocada para baixo por quase um corpo inteiro, e a
+	# auditoria acusaria sobreposições que não existem enquanto deixaria
+	# passar as que existem.
+	var acima := fonte_texto.get_ascent(corpo)
+	var abaixo := fonte_texto.get_descent(corpo)
+	if _auditando_o_miolo and (y - acima < CENTRAL_TOPO or y + abaixo > CENTRAL_BASE):
+		# Fora da janela que rola: as faixas opacas cobrem esta linha
+		# inteira. Ela volta à vista quando o operador rolar a página, e
+		# aí já não há faixa nenhuma sobre ela.
+		return
+	auditoria.append({
+		"rect": Rect2(esquerda, y - acima, medida.x, acima + abaixo),
+		"texto": texto, "corpo": corpo,
+	})
+
 func _texto(
 	texto: String, y: float, tamanho: int, cor: Color,
 	alinhamento := HORIZONTAL_ALIGNMENT_CENTER, x := MARGEM, largura := LARGURA_UTIL
 ) -> void:
-	draw_string(fonte_texto, Vector2(x, y), texto, alinhamento, largura, _corpo(tamanho), cor)
+	var corpo := _corpo(tamanho)
+	if auditoria_de_layout:
+		_anotar_texto(texto, y, corpo, alinhamento, x, largura)
+	draw_string(fonte_texto, Vector2(x, y), texto, alinhamento, largura, corpo, cor)
 
 ## COMPENSAÇÃO DE ALTURA ENTRE AS DUAS LETRAS.
 ##
@@ -6472,8 +6959,17 @@ func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largur
 	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
 	_letreiro(texto, Vector2(x + (largura - medida.x) * 0.5, y), tamanho, cor, Color(cor, 0.28))
 
+## A AUDITORIA PRECISA VER ESTA FUNÇÃO TAMBÉM.
+##
+## Enquanto ela desenhou direto, o teste de legibilidade tinha um ponto
+## cego do tamanho da Central: TODO rótulo de botão e TODO valor de
+## stepper sai por aqui, e nenhum deles passava por `_texto`. O primeiro
+## defeito que isso escondeu foi na página nova — o botão TENTAR DE NOVO
+## cobrindo, por inteiro, a linha que diz onde o saco está.
 func _texto_cabendo(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:
+	var corpo := _tamanho_que_cabe(texto, _corpo(tamanho_max), largura, fonte_texto)
 	draw_string(
-		fonte_texto, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura,
-		_tamanho_que_cabe(texto, _corpo(tamanho_max), largura, fonte_texto), cor
+		fonte_texto, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura, corpo, cor
 	)
+	if auditoria_de_layout:
+		_anotar_texto(texto, y, corpo, HORIZONTAL_ALIGNMENT_CENTER, x, largura)
