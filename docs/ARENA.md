@@ -73,16 +73,59 @@ As medidas que definem o personagem:
 
 | medida | valor |
 |---|---|
-| altura total | ~1,80 m |
-| ombro a ombro | 0,55 m |
+| altura total | 1,91 m (com a crista do cabelo) |
+| ombro a ombro | 0,64 m |
 | cintura | 0,20 m |
-| cabeça | 0,24 m (≈ 7,5 cabeças de altura) |
-| luva | 0,066 m de raio, contra um punho de 0,046 m |
+| cabeça | 0,22 m — **8,7 cabeças de altura** |
+| luva | 0,068 m de raio, contra um punho de 0,046 m |
 
-O V do tronco sai da razão ombro/cintura. Uma versão anterior tinha 0,50
-contra 0,38 — um e pouco para um é a proporção de um barril, e foi o que
-manteve a queixa de "parece um gordinho" mesmo depois de trocar a
-iluminação. `tests/test_arena.gd` guarda estas razões.
+Duas razões, e as duas viraram teste em `tests/test_arena.gd`:
+
+**O V sai de ombro sobre cintura.** Uma versão tinha 0,50 contra 0,38 —
+um e pouco para um é a proporção de um barril, e foi o que manteve a
+queixa de "parece um gordinho" mesmo depois de trocar a iluminação.
+
+**E a altura sai de quantas cabeças.** O boneco gigante de Olinda é uma
+cabeça enorme sobre um corpo pequeno, e foi exatamente essa a queixa
+seguinte. Duas versões caíram em 6,5 e 7,4 cabeças, que é proporção de
+desenho infantil; herói de anime adulto tem oito ou mais. A proporção é
+a primeira coisa que o olho lê — antes do rosto, antes da pose —, e por
+isso ela é teste e não gosto.
+
+## O músculo é geometria, e a definição é luz
+
+Um tronco torneado é um volume liso: a luz cai nele de um jeito só e
+nada quebra a passagem da luz para a sombra. O que faz um peito ler como
+peito é a SEQUÊNCIA de volumes — peitoral, serrátil, oblíquo, dorsal —
+cada um com a sua divisa, cada um pegando a luz num ângulo diferente.
+
+O corpo tem peitoral, os seis do abdome com a linha alba entre eles,
+oblíquo, serrátil, dorsal, trapézio, as três cabeças do deltoide,
+bíceps, tríceps, braquiorradial, o vasto e o reto da coxa, e as duas
+cabeças da panturrilha. Trinta e dois mil triângulos — o dobro da
+versão lisa — e **as mesmas onze chamadas de desenho**, porque tudo isso
+é costurado dentro da junta que o carrega.
+
+Três coisas aprendidas apanhando do render, todas contra-intuitivas:
+
+* **relevo tem de ser inchaço, não peça pousada.** As primeiras versões
+  do arco da órbita e da maçã do rosto ficaram POR FORA da silhueta da
+  cabeça e apareceram como salsichas rosadas. O que desenha a forma é a
+  divisa das bandas passando por cima do relevo, e para isso basta meio
+  milímetro de saliência;
+* **peitoral redondo lê como seio.** Ele precisa ser uma placa rasa
+  (0,34 de achatamento, não 0,46), com a massa em cima e inclinada na
+  direção da fibra — do esterno para o ombro, subindo;
+* **luz frontal apaga a forma.** Era a maior causa do "parece 2D", mais
+  do que o número de bandas: luz de frente ilumina tudo o que a câmera
+  vê com a mesma intensidade e o que sobra é uma silhueta preenchida.
+
+O sombreador (`shaders/lutador_toon.gdshader`) fecha a conta: quatro
+degraus de luz, sombra colorida e não cinza, um rebatedor frio do lado
+oposto para a sombra não morrer, brilho especular com o tamanho de um
+ponto (`dureza 140` — com 52 ele saía como mancha branca mole, tinta
+respingada no corpo) e o brilho de cada material viajando no VÉRTICE,
+porque depois da fusão não existe mais peça onde guardar um material.
 
 ## Onze chamadas de desenho, e não sessenta e três
 

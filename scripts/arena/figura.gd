@@ -343,12 +343,21 @@ static func _colher(
 	if no is MeshInstance3D and (no as MeshInstance3D).mesh != null:
 		var malha: Mesh = (no as MeshInstance3D).mesh
 		var cor: Color = no.get_meta("cor", Color.WHITE)
-		# Cada vértice leva, na primeira coordenada de textura, se a peça
-		# dele entra ou não na casca do contorno. É o caminho mais barato
-		# de contar isso a um sombreador — e o único que sobrevive à
-		# fusão, porque depois dela não existe mais "peça" nenhuma.
+		# CADA VÉRTICE LEVA DUAS COISAS NA COORDENADA DE TEXTURA:
+		#
+		#   .x  se a peça dele entra na casca do contorno;
+		#   .y  quanto a peça BRILHA.
+		#
+		# A segunda é a que separa couro de pele. Depois da fusão não
+		# existe mais "peça" nenhuma — cabeça, cabelo, olhos e sete
+		# espetos são uma superfície só —, então não há material por peça
+		# onde guardar isso. No vértice, há. É o que permite a luva
+		# vermelha ter o estouro de luz de couro envernizado enquanto a
+		# pele ao lado dela tem só um realce macio, na MESMA chamada de
+		# desenho.
 		var tamanho := malha.get_aabb().size
 		var contornar := 1.0 if maxf(tamanho.x, maxf(tamanho.y, tamanho.z)) > CONTORNO_A_PARTIR_DE else 0.0
+		var brilho: float = no.get_meta("brilho", 0.3)
 		for s in range(malha.get_surface_count()):
 			var arrays := malha.surface_get_arrays(s)
 			var v: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
@@ -356,7 +365,7 @@ static func _colher(
 			var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 			var base := vertices.size()
 			for i in range(v.size()):
-				traco.push_back(Vector2(contornar, 0.0))
+				traco.push_back(Vector2(contornar, brilho))
 				vertices.push_back(ate_aqui * v[i])
 				# A NORMAL GIRA, MAS NÃO ANDA. Somar a translação junto
 				# seria apontar todas as normais para o mesmo canto do

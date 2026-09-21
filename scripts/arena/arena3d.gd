@@ -576,8 +576,16 @@ func _camera() -> void:
 	# cabeça ocupam o quadro, que é onde o soco acerta e onde a reação
 	# acontece. Os pés continuam no quadro para a queda do nocaute ter
 	# para onde cair.
-	var pos := Vector3(passeio, 1.34 + sin(_relogio * 0.21) * 0.05, 2.72 - _empurrao * 0.24)
-	var mira := Vector3(0.0, 1.16 + _empurrao * 0.06, 0.0)
+	# E CHEGOU MAIS PERTO DE NOVO, porque o lutador ganhou o que mostrar.
+	#
+	# Enquanto ele era liso, folga em volta não custava nada. Agora que
+	# peitoral, abdome, deltoide e panturrilha são relevo de verdade e o
+	# couro da luva tem estouro de luz, mostrar tudo isso a 2,7 m dentro
+	# de uma janela de 576 px é jogar fora o trabalho: a essa distância um
+	# músculo tem três pixels. Em 2,30 m a figura ocupa o quadro, e é aí
+	# que a diferença entre um desenho chapado e um corpo aparece.
+	var pos := Vector3(passeio, 1.30 + sin(_relogio * 0.21) * 0.05, 2.30 - _empurrao * 0.24)
+	var mira := Vector3(0.0, 1.14 + _empurrao * 0.06, 0.0)
 	# QUANDO ELE CAI, A CÂMERA VAI JUNTO. Ficar parada na altura do peito
 	# depois do nocaute deixaria a moldura com um ringue vazio e o corpo
 	# fora de quadro — que foi exatamente o que aconteceu na primeira

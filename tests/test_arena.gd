@@ -105,7 +105,31 @@ func _test_o_corpo_e_um_atleta() -> void:
 	var luva := corpo.find_child("Luva_D", true, false) as MeshInstance3D
 	var cabeca := corpo.find_child("Cabeca", true, false) as MeshInstance3D
 	_ok(luva != null and cabeca != null, "luva e cabeça têm de existir")
+
+	# QUANTAS CABEÇAS DE ALTURA — a medida que separa um herói de um
+	# boneco de Olinda, que foi a queixa exata que veio do operador.
+	#
+	# O boneco gigante do carnaval é uma cabeça enorme sobre um corpo
+	# pequeno; herói de anime adulto tem oito cabeças ou mais. Duas
+	# versões seguidas deste lutador caíram em 6,5 e 7,4, e nas duas a
+	# figura saiu infantil por mais músculo que o corpo tivesse. A
+	# proporção é a primeira coisa que o olho lê, antes do rosto e antes
+	# da pose, e por isso ela é teste e não gosto.
+	var alto := _alto_do_corpo(corpo)
+	var cabecas := alto / (LutadorNativo.RAIO_DA_CABECA * 2.0 * 1.09)
+	_ok(cabecas >= 7.8, "o corpo precisa de 7,8 cabeças ou mais (tem %.1f)" % cabecas)
+	_ok(cabecas <= 9.0, "acima de nove cabeças a figura vira caricatura magra (%.1f)" % cabecas)
 	corpo.free()
+
+## A altura do ponto mais alto do corpo acima da lona, varrendo as peças.
+func _alto_do_corpo(raiz: Node3D) -> float:
+	var teto := 0.0
+	for malha in _todas_as_malhas(raiz):
+		if malha.mesh == null:
+			continue
+		var caixa := malha.mesh.get_aabb()
+		teto = maxf(teto, _onde(raiz, malha).y + caixa.position.y + caixa.size.y)
+	return teto
 
 ## O CORPO INTEIRO CABE EM POUCAS CHAMADAS DE DESENHO.
 ##
