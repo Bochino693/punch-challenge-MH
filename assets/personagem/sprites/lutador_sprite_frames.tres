@@ -1,4 +1,4 @@
-[gd_resource type="SpriteFrames" load_steps=10 format=3]
+[gd_resource type="SpriteFrames" load_steps=11 format=3]
 
 [ext_resource type="Texture2D" path="res://assets/personagem/sprites/lutador_folha_3x3.png" id="1_folha"]
 
@@ -39,43 +39,39 @@ atlas = ExtResource("1_folha")
 region = Rect2(820, 852, 410, 426)
 
 [resource]
-animations = [{
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_direto")}],
+animations = [{"frames": [{"duration": 1.0, "texture": SubResource("Atlas_guarda")}],
 "loop": false,
-"name": &"direto_direito",
-"speed": 8.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_guarda")}, {"duration": 1.0, "texture": SubResource("Atlas_idle")}],
-"loop": true,
 "name": &"guarda",
-"speed": 2.2
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_corpo")}],
-"loop": false,
-"name": &"impacto_corpo",
-"speed": 8.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_forte")}],
-"loop": false,
-"name": &"impacto_forte",
-"speed": 8.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_jab")}],
-"loop": false,
-"name": &"jab_esquerdo",
-"speed": 8.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_nocaute")}],
-"loop": false,
-"name": &"nocaute",
 "speed": 5.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_preparado")}],
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_idle")}],
+"loop": false,
+"name": &"idle",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_preparado")}],
 "loop": false,
 "name": &"preparado",
 "speed": 5.0
-}, {
-"frames": [{"duration": 1.0, "texture": SubResource("Atlas_recuperacao")}],
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_jab")}],
+"loop": false,
+"name": &"jab",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_direto")}],
+"loop": false,
+"name": &"direto",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_corpo")}],
+"loop": false,
+"name": &"impacto_corpo",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_forte")}],
+"loop": false,
+"name": &"impacto_forte",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_nocaute")}],
+"loop": false,
+"name": &"nocaute",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_recuperacao")}],
 "loop": false,
 "name": &"recuperacao",
 "speed": 5.0

@@ -1,374 +1,199 @@
 class_name Lutador3D
 extends Node3D
 
-## Controlador do adversário humanoide. O contrato preferido é um GLB com
-## Skeleton3D, skin e AnimationPlayer; a pose procedural existe somente como
-## fallback para um asset externo incompleto.
+## O ADVERSÁRIO — AGORA DESENHADO, E NÃO MODELADO.
 ##
-## ------------------------------------------------------------------
-## AS DUAS COISAS QUE FAZIAM O BONECO PARECER ARTIFICIAL.
+## POR QUE O CORPO PROCEDURAL SAIU. Ele foi construído aqui mesmo, em
+## GDScript: anéis torneados, músculo modelado, sombreador de desenho com
+## brilho por material. Tecnicamente funcionava e custava onze chamadas
+## de desenho. Visualmente não chegou nunca onde precisava: a queixa
+## final foi "grosso, cabelo mal definido, sem profundidade, o antebraço
+## parece colado ao tórax" — e as quatro estavam certas. Geometria feita
+## de elipsoides somados tem um teto de qualidade, e esse teto fica bem
+## abaixo de uma ilustração.
 ##
-## 1. NENHUMA ANIMAÇÃO DO GLB TINHA LOOP. O glTF não guarda essa
-##    informação, e o Godot importa tudo como tocar-uma-vez. `idle` dura
-##    três segundos: ele tocava, PARAVA, e no quadro seguinte
-##    `_tocar("idle")` via que não estava mais rodando e mandava tocar de
-##    novo — do começo, com meio quarto de segundo de mistura entre a
-##    última pose e a primeira. Ou seja: a cada três segundos o lutador
-##    dava um solavanco parado no lugar, para sempre, na tela em que o
-##    jogador passa mais tempo olhando para ele. `_ajustar_loops` resolve
-##    dizendo quais papéis são contínuos.
+## O QUE ENTROU NO LUGAR. Uma folha de nove poses desenhadas
+## (`assets/personagem/sprites/lutador_folha_3x3.png`), montadas num
+## `AnimatedSprite3D` DENTRO da arena 3D — e não numa camada 2D por
+## cima. A diferença importa: assim o lutador continua no ringue, com a
+## perspectiva real, a câmera que recua no impacto, o tremor, as
+## partículas de suor e poeira, a luz ciano e magenta e o enquadramento
+## do nocaute. Nada disso precisou ser reescrito.
 ##
-## 2. AS DURAÇÕES DAS REAÇÕES ERAM CHUTADAS À MÃO, e todas curtas demais.
-##    `taunt_weak` foi anotado como 1,18 s e dura 1,40; `stagger`, 1,35
-##    contra 1,53. O relógio acabava antes do gesto, a volta para a
-##    guarda começava no meio do movimento, e o resultado é um boneco que
-##    nunca termina o que começou. Pior: `bater` toca com velocidade
-##    entre 0,92× e 1,12× conforme a força, o que muda a duração REAL e
-##    nenhuma tabela à mão poderia acompanhar. Agora a duração é medida
-##    da própria animação e dividida pela velocidade em que ela vai ser
-##    tocada. A tabela sobrou só para o caso de o papel não existir no
-##    arquivo.
+## E AS NOVE POSES SÃO POSES, NÃO ANIMAÇÕES. Cada papel tem UM desenho.
+## O que transforma nove desenhos parados num lutador que se mexe é o
+## MOVIMENTO PROCEDURAL desta página: o recuo do corpo no impacto, a
+## inclinação, o balanço da respiração, o cambaleio, o tombo e a volta.
+## É a mesma técnica de um jogo de luta 2D clássico — poucos quadros,
+## muita física por cima —, e é ela que faz um soco leve e um soco que
+## derruba parecerem coisas diferentes mesmo quando a ilustração de
+## fundo é a mesma.
+
+const FOLHA := "res://assets/personagem/sprites/lutador_sprite_frames.tres"
 
 const DANO_POR_GOLPE := 0.62
 const DANO_MINIMO := 0.02
 const TEMPO_NA_LONA := 3.35
-## Só o padrão: quando o GLB traz `get_up`, vale o comprimento dela.
-const TEMPO_LEVANTAR_PADRAO := 1.65
+const TEMPO_LEVANTAR := 1.25
 
 ## OS PAPÉIS QUE SE REPETEM ENQUANTO NADA ACONTECE. Todo o resto é um
 ## gesto com começo e fim, e repetir um gesto desses seria o tique
 ## nervoso que uma máquina de salão não pode ter.
 const PAPEIS_CONTINUOS := ["idle", "guard"]
 
-## Quanto dura cada reação QUANDO A ANIMAÇÃO NÃO EXISTE no arquivo. Com
-## ela, manda o comprimento medido. Ver o cabeçalho.
-const DURACAO_PADRAO := {
-	"taunt_weak": 1.18, "stagger": 1.35, "hit_heavy": 1.05,
-	"hit_medium": 0.82, "hit_light": 0.58,
+## OS NOVE PAPÉIS DO JOGO, E QUAL DESENHO CADA UM USA.
+##
+## Nove papéis e nove desenhos, mas a correspondência não é um para um —
+## e é de propósito. `hit_light` e `hit_medium` partilham a mesma
+## ilustração porque a diferença entre um e outro não está no DESENHO,
+## está no quanto o corpo recua e em quanto tempo ele volta. Já o
+## desdém usa os dois socos da folha, alternados: o adversário devolve
+## um jab e um direto no ar, que é a coisa mais próxima de "nem senti"
+## que se pode dizer sem texto.
+const PAPEIS := {
+	"idle": {"quadros": ["idle", "guarda"], "ciclo": 1.05},
+	"guard": {"quadros": ["guarda", "preparado"], "ciclo": 0.72},
+	"taunt_weak": {"quadros": ["jab", "direto", "jab", "guarda"], "ciclo": 0.30},
+	"hit_light": {"quadros": ["impacto_corpo"]},
+	"hit_medium": {"quadros": ["impacto_corpo"]},
+	"hit_heavy": {"quadros": ["impacto_forte"]},
+	"stagger": {"quadros": ["impacto_forte", "impacto_corpo"], "ciclo": 0.42},
+	"knockout": {"quadros": ["impacto_forte", "nocaute"], "ciclo": 0.22, "uma_vez": true},
+	"get_up": {"quadros": ["recuperacao"]},
 }
 
-const JUNTAS := [
-	"Quadril", "Tronco", "Cabeca", "Pescoco", "Ombro_E", "Ombro_D",
-	"Antebraco_E", "Antebraco_D", "Luva_E", "Luva_D", "Coxa_E", "Coxa_D",
-	"Canela_E", "Canela_D",
-]
-
+## OS ALIASES CONTINUAM, e não por nostalgia: eles são o contrato entre
+## o jogo e o desenho. Quem quiser trocar a folha por outra arte sabe
+## exatamente quais nomes precisa entregar.
 const ALIASES := {
-	"idle": ["idle", "breathing_idle", "boxer_idle"],
-	"guard": ["guard", "boxing_guard", "fighting_idle"],
-	"taunt_weak": ["taunt_weak", "taunt", "mock", "disdain"],
-	"hit_light": ["hit_light", "light_hit", "hit_reaction_1"],
-	"hit_medium": ["hit_medium", "medium_hit", "hit_reaction_2"],
-	"hit_heavy": ["hit_heavy", "heavy_hit", "hit_reaction_3"],
-	"stagger": ["stagger", "stumble", "impact_heavy"],
-	"knockout": ["knockout", "ko", "fall_back", "knock_down"],
-	"get_up": ["get_up", "stand_up", "recover"],
+	"idle": ["idle"], "guard": ["guarda"], "taunt_weak": ["jab", "direto"],
+	"hit_light": ["impacto_corpo"], "hit_medium": ["impacto_corpo"],
+	"hit_heavy": ["impacto_forte"], "stagger": ["impacto_forte"],
+	"knockout": ["nocaute"], "get_up": ["recuperacao"],
 }
 
-## A CABEÇA DE DESENHO.
+## QUANTO DURA CADA REAÇÃO, e por que agora é uma tabela de novo.
 ##
-## O modelo veio com proporção realista: cabeça pequena, ombros largos,
-## luvas enormes. Em pé na guarda, as duas luvas cobrem a cabeça inteira e
-## o jogador nunca vê um rosto — e é impossível gostar de um personagem
-## cujo rosto nunca aparece. Toda linguagem de desenho resolve isso do
-## mesmo jeito, e é o mais barato que existe: cabeça maior.
-##
-## Um terço a mais basta. Acima disso o pescoço aparece fino demais e o
-## boneco vira caricatura de si mesmo.
-## A ESCULTURA: PROPORÇÃO DE ATLETA EM CIMA DO MODELO QUE EXISTE.
-##
-## A queixa foi "parece um gordinho". O modelo não tem gordura nenhuma —
-## tem as PROPORÇÕES erradas para o personagem que a referência pede, e
-## são três, cada uma bastando sozinha:
-##
-##   LUVA DO TAMANHO DA CABEÇA. É a mais forte de todas. Luva enorme é
-##   linguagem de desenho infantil, e ainda escondia o rosto inteiro na
-##   guarda — não dá para gostar de um personagem que nunca se vê.
-##   CINTURA DA LARGURA DO PEITO. Sem o V do tronco, o corpo lê como um
-##   retângulo, e retângulo lê como corpo mole por mais músculo que
-##   tenha desenhado em cima.
-##   CABEÇA PEQUENA. Proporção realista num boneco estilizado dá aquele
-##   ar de action figure genérico.
-##
-## Regravar a malha exigiria Blender; reescalar OSSO não exige nada. E
-## como a escala de um osso desce para os filhos, o V sai de duas linhas:
-## afina a coluna (que leva o peito e os braços junto) e devolve a largura
-## só nos OMBROS. Cintura fina, ombro largo, e nenhum vértice movido à mão.
-##
-## Tudo isto é aplicado DEPOIS da animação, todo quadro — ver
-## `_esculpir`. O tocador reescreve a pose de cada osso a cada quadro, e
-## um ajuste feito uma vez na montagem seria apagado no primeiro
-## movimento.
-const ESCALA_DA_CABECA := 1.16
-const OSSO_DA_CABECA := "head"
-
-## Cada entrada é `osso: escala`. Uniforme onde a peça inteira muda de
-## tamanho; por eixo onde o que muda é a forma.
-const ESCULTURA := {
-	# As luvas encolhem um terço. A mais importante das três.
-	"glove_l": Vector3(0.66, 0.66, 0.66),
-	"glove_r": Vector3(0.66, 0.66, 0.66),
-	# A cintura afina — e leva peito, braços e cabeça junto, porque escala
-	# de osso desce para os filhos.
-	"spine": Vector3(0.82, 1.05, 0.86),
-	# …e os ombros devolvem a largura, só aí. É isto, e só isto, que
-	# desenha o V.
-	"shoulder_l": Vector3(1.26, 1.0, 1.16),
-	"shoulder_r": Vector3(1.26, 1.0, 1.16),
-	# O antebraço afina um pouco: braço de boxeador é grosso em cima e
-	# fino embaixo, e era reto dos dois lados.
-	"forearm_l": Vector3(0.92, 1.0, 0.92),
-	"forearm_r": Vector3(0.92, 1.0, 0.92),
+## Quando as reações eram animações de verdade, a duração saía do
+## comprimento delas — uma tabela à mão não teria como acompanhar. Com
+## poses desenhadas não há comprimento nenhum a medir: a duração É a
+## decisão de direção, e é aqui que ela mora. A escada entre elas é o
+## que faz a nota na tela e a reação do corpo contarem a mesma história.
+const DURACAO := {
+	"taunt_weak": 1.20, "stagger": 1.30, "hit_heavy": 0.95,
+	"hit_medium": 0.70, "hit_light": 0.46,
 }
 
-var _osso_cabeca := -1
-var _escultura_indices: Dictionary = {}
-var _juntas: Dictionary = {}
-var _repouso: Dictionary = {}
-var _raiz: Node3D = null
-var _animador: AnimationPlayer = null
-var _esqueleto: Skeleton3D = null
-var _animacoes: Dictionary = {}
+## A FORÇA DO RECUO DE CADA REAÇÃO: quanto o corpo anda para trás (m),
+## quanto ele tomba (rad) e quanto ele afunda (m). É esta tabela, e não
+## o desenho, que separa um golpe de 3.000 de um de 9.000.
+const RECUO := {
+	"taunt_weak": {"tras": 0.00, "tombo": 0.00, "lado": 0.06},
+	"hit_light": {"tras": 0.10, "tombo": 0.05, "lado": 0.04},
+	"hit_medium": {"tras": 0.22, "tombo": 0.10, "lado": 0.08},
+	"hit_heavy": {"tras": 0.36, "tombo": 0.16, "lado": 0.12},
+	"stagger": {"tras": 0.52, "tombo": 0.24, "lado": 0.22},
+}
+
+## ------------------------------------------------------------ o tamanho
+##
+## A folha tem 426 px de altura por pose, e a figura ocupa cerca de 86%
+## disso. Para o lutador medir 1,80 m no ringue, o quadro inteiro precisa
+## medir 2,09 — e é dividindo isso pelos 426 px que sai o tamanho do
+## pixel no mundo.
+const ALTURA_DO_QUADRO := 2.09
+const ALTURA_DA_FOLHA := 426.0
+const PES_NO_QUADRO := 0.972
+
+var _figura: AnimatedSprite3D = null
+var _corpo: Node3D = null
+var _frames: SpriteFrames = null
+var _descanso := Transform3D.IDENTITY
+
 var _relogio := 0.0
+var _papel := "idle"
+var _tempo_no_papel := 0.0
+var _tempo_reacao := 0.0
 var _recuo := 0.0
 var _forca_do_recuo := 0.0
 var _lado := 1.0
-var _tempo_reacao := 0.0
 var _tempo_na_lona := 0.0
-var _tempo_levantar := TEMPO_LEVANTAR_PADRAO
 var _levantando := false
-var queda := 0.0
 var _caindo := false
+var _clarao := 0.0
+
+var queda := 0.0
 var dano := 0.0
 var em_guarda := false
 
-func montar(corpo: Node3D) -> void:
-	_raiz = corpo
-	add_child(corpo)
-	# O CORPO NATIVO CHEGA SEM TOCADOR, e ganha um aqui: as nove ações são
-	# tabelas de ângulos (`LutadorAnimacao`) montadas em faixas de posição
-	# e rotação na hora. Um corpo que já traga o seu tocador — um `.glb`
-	# que alguém queira pôr no lugar — continua valendo, e é por isto que
-	# a busca vem antes.
-	_animador = _achar_animador(corpo)
-	if _animador == null:
-		_animador = LutadorAnimacao.montar(corpo)
-	_esqueleto = _achar_esqueleto(corpo)
-	_indexar_animacoes()
-	_ajustar_loops()
-	_osso_cabeca = _esqueleto.find_bone(OSSO_DA_CABECA) if _esqueleto != null else -1
-	_dar_uma_boca()
-	# Os índices são procurados UMA vez: `find_bone` percorre a lista de
-	# ossos por nome, e isto roda em todo quadro.
-	_escultura_indices.clear()
-	if _esqueleto != null:
-		for nome in ESCULTURA:
-			var osso := _esqueleto.find_bone(str(nome))
-			if osso >= 0:
-				_escultura_indices[str(nome)] = osso
-	_osso_raiz = _esqueleto.find_bone(OSSO_RAIZ) if _esqueleto != null else -1
-	for nome in JUNTAS:
-		var no := corpo.find_child(nome, true, false)
-		if no is Node3D:
-			_juntas[nome] = no
-			_repouso[nome] = (no as Node3D).transform
-	_repouso["__raiz__"] = corpo.transform
-	_guardar_o_repouso(corpo)
+# ====================================================================
+# MONTAGEM
+# ====================================================================
 
-## A POSE DE REPOUSO DE CADA PEÇA, GUARDADA UMA VEZ.
-##
-## É o conserto de um defeito que só aparece no fim de uma noite movimentada:
-## uma rodada pode ACABAR com o adversário no chão, e as faixas de
-## `knockout` deixam joelho e cotovelo dobrados na última pose. O clipe
-## `idle` não tem faixa de perna nenhuma — ele anima tronco, cabeça e
-## ombro —, então o jogador seguinte encontraria um lutador de pé com as
-## pernas ainda dobradas do tombo anterior, para sempre.
-##
-## Guardando a pose de nascimento de TODAS as peças, `preparar` devolve o
-## corpo inteiro ao lugar antes do primeiro quadro da próxima rodada.
-var _pose_inicial: Array[Node3D] = []
-var _transforma_inicial: Array[Transform3D] = []
+## Monta o lutador. `_ignorado` existe só para quem ainda chama com o
+## corpo antigo no braço; a folha é encontrada sozinha.
+func montar(_ignorado: Variant = null) -> void:
+	_frames = load(FOLHA) as SpriteFrames
+	_corpo = Node3D.new()
+	_corpo.name = "Corpo"
+	add_child(_corpo)
+	_figura = AnimatedSprite3D.new()
+	_figura.name = "Figura"
+	_figura.sprite_frames = _frames
+	# O DESENHO JÁ VEM ILUMINADO. Deixar as luzes da arena baterem nele
+	# seria iluminar duas vezes: a sombra pintada na ilustração brigaria
+	# com a sombra calculada, e o resultado é o cinza chapado que
+	# aparece sempre que se acende luz em cima de arte já sombreada.
+	_figura.shaded = false
+	_figura.double_sided = false
+	# BILHETE FIXO, E NÃO VIRADO PARA A CÂMERA. Um cartaz que gira para
+	# acompanhar o olho parece um corpo que se vira sozinho — e no
+	# nocaute, com a câmera descendo, o lutador caído "levantaria" para
+	# continuar encarando. O passeio lateral da câmera é de quatro graus;
+	# um plano parado aguenta isso sem aparecer.
+	_figura.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	# O RECORTE É POR LIMIAR BAIXO. Alto demais come o halo ciano e
+	# magenta que a arte tem na borda — que é justamente o que recorta o
+	# lutador contra o fundo escuro. Baixo demais deixa entrar o quadrado
+	# quase transparente da folha.
+	_figura.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	_figura.alpha_scissor_threshold = 0.04
+	_figura.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_figura.pixel_size = ALTURA_DO_QUADRO / ALTURA_DA_FOLHA
+	# Os pés da figura não ficam na borda de baixo do quadro: há uma
+	# margem transparente. Subir o sprite por essa margem é o que põe a
+	# sola na lona em vez de dentro dela.
+	_figura.position = Vector3(
+		0.0, ALTURA_DO_QUADRO * (PES_NO_QUADRO - 0.5), 0.0
+	)
+	_corpo.add_child(_figura)
+	_descanso = _corpo.transform
+	_tocar("idle")
 
-func _guardar_o_repouso(no: Node) -> void:
-	if no is Node3D:
-		_pose_inicial.append(no as Node3D)
-		_transforma_inicial.append((no as Node3D).transform)
-	for filho in no.get_children():
-		_guardar_o_repouso(filho)
-
-func _voltar_ao_repouso() -> void:
-	for i in range(_pose_inicial.size()):
-		_pose_inicial[i].transform = _transforma_inicial[i]
-
-## A BOCA QUE O MODELO NUNCA TEVE.
-##
-## "Sem boca" foi a queixa, e é literal: o GLB traz olhos e sobrancelhas
-## e para aí. Uma cabeça com dois olhos e mais nada não é um rosto — é um
-## ovo —, e nenhuma quantidade de sombreamento conserta isso.
-##
-## Ela é pendurada no OSSO DA CABEÇA, com um `BoneAttachment3D`: assim
-## acompanha cada virada de cabeça das nove animações sem que nenhuma
-## delas precise saber que ela existe. E é geometria nova, criada aqui —
-## não depende de o arquivo do boneco ter sido regravado, então continua
-## valendo se alguém trocar o `lutador.glb` por outro com os mesmos ossos.
-##
-## O desenho é o mínimo que lê a três metros: uma boca escura e um lábio
-## de baixo. Boca fina demais some dentro do contorno preto do desenho, e
-## foi por isso que a primeira tentativa não apareceu na tela.
-## MEDIDO NA TELA, E NÃO ESTIMADO. A primeira posição pôs a boca DENTRO
-## da cabeça: apareciam dois risquinhos escuros nas bordas e mais nada. A
-## cabeça deste modelo é um volume arredondado de uns 19 cm de raio, então
-## a superfície do rosto na altura da boca fica perto de 17 cm à frente do
-## osso — não 11.
-const BOCA_LOCAL := Vector3(0.0, 0.046, 0.170)
-const BOCA_TAMANHO := Vector3(0.072, 0.019, 0.050)
-
-func _dar_uma_boca() -> void:
-	if _esqueleto == null or _osso_cabeca < 0:
-		return
-	var suporte := BoneAttachment3D.new()
-	suporte.name = "SuporteDaBoca"
-	suporte.bone_idx = _osso_cabeca
-	_esqueleto.add_child(suporte)
-
-	var boca := MeshInstance3D.new()
-	boca.name = "Boca"
-	var caixa := BoxMesh.new()
-	caixa.size = BOCA_TAMANHO
-	boca.mesh = caixa
-	boca.position = BOCA_LOCAL
-	boca.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	suporte.add_child(boca)
-
-	var labio := MeshInstance3D.new()
-	labio.name = "Labio"
-	var caixa2 := BoxMesh.new()
-	caixa2.size = Vector3(BOCA_TAMANHO.x * 0.86, 0.010, BOCA_TAMANHO.z * 0.94)
-	labio.mesh = caixa2
-	labio.position = BOCA_LOCAL + Vector3(0.0, -0.013, 0.001)
-	labio.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	suporte.add_child(labio)
-
-	_pecas_do_rosto = [boca, labio]
-	_cores_do_rosto = [Color(0.13, 0.02, 0.03), Color(0.62, 0.22, 0.20)]
-
-## As peças criadas aqui precisam receber a mesma pintura do resto do
-## corpo; `Arena3D` as encontra pela varredura de malhas.
-var _pecas_do_rosto: Array[MeshInstance3D] = []
-var _cores_do_rosto: Array[Color] = []
-
-## A cor com que cada peça do rosto deve ser pintada. `Arena3D` pergunta.
-func cor_da_peca(malha: MeshInstance3D) -> Variant:
-	var i := _pecas_do_rosto.find(malha)
-	return _cores_do_rosto[i] if i >= 0 else null
-
-func tem_esqueleto() -> bool:
-	return _esqueleto != null and _esqueleto.get_bone_count() >= 15
-
-## O LUTADOR ESTÁ COMPLETO quando as nove ações existem de verdade.
-##
-## Esta é a pergunta que a Central faz, e antes ela era "tem esqueleto?" —
-## uma pergunta sobre o FORMATO do arquivo, que respondia "modelo leve
-## ativo, rode o GERAR_PERSONAGEM.bat" para um corpo perfeitamente
-## completo. O que importa a quem opera a máquina não é como o boneco foi
-## construído: é se ele sabe apanhar, cambalear, cair e levantar.
+## O lutador está completo quando os nove papéis acham desenho na folha.
 func completo() -> bool:
-	for papel in ALIASES:
-		if not _animacoes.has(papel):
-			return false
+	if _frames == null:
+		return false
+	for papel in PAPEIS:
+		for nome in (PAPEIS[papel]["quadros"] as Array):
+			if not _frames.has_animation(StringName(str(nome))):
+				return false
 	return true
 
 func animacoes_disponiveis() -> PackedStringArray:
 	var nomes := PackedStringArray()
-	for nome in _animacoes:
-		nomes.append(str(nome))
+	for papel in PAPEIS:
+		nomes.append(str(papel))
 	return nomes
 
-func _achar_animador(no: Node) -> AnimationPlayer:
-	if no is AnimationPlayer:
-		return no
-	for filho in no.get_children():
-		var achado := _achar_animador(filho)
-		if achado != null:
-			return achado
-	return null
+func tem_esqueleto() -> bool:
+	return false
 
-func _achar_esqueleto(no: Node) -> Skeleton3D:
-	if no is Skeleton3D:
-		return no
-	for filho in no.get_children():
-		var achado := _achar_esqueleto(filho)
-		if achado != null:
-			return achado
-	return null
-
-func _normalizar(nome: String) -> String:
-	var n := nome.to_lower().replace(" ", "_").replace("-", "_")
-	for separador in ["|", "/", ":"]:
-		if separador in n:
-			n = n.get_slice(separador, n.get_slice_count(separador) - 1)
-	return n
-
-func _indexar_animacoes() -> void:
-	_animacoes.clear()
-	if _animador == null:
-		return
-	var existentes := _animador.get_animation_list()
-	for papel in ALIASES:
-		for real in existentes:
-			var normal := _normalizar(str(real))
-			for alias in ALIASES[papel]:
-				if normal == alias or normal.ends_with("_" + alias) or alias in normal:
-					_animacoes[papel] = real
-					break
-			if _animacoes.has(papel):
-				break
-
-## QUAIS ANIMAÇÕES SE REPETEM — dito uma vez, no arranque.
-##
-## O glTF não carrega essa informação, então o importador marca tudo como
-## tocar-uma-vez e cabe a quem usa o arquivo dizer o que é postura e o
-## que é gesto. Sem isto, a postura parada do lutador reiniciava com
-## mistura a cada ciclo, para sempre. Ver o cabeçalho.
-func _ajustar_loops() -> void:
-	if _animador == null:
-		return
-	for papel in _animacoes:
-		var anim := _animador.get_animation(_animacoes[papel])
-		if anim == null:
-			continue
-		anim.loop_mode = (
-			Animation.LOOP_LINEAR if str(papel) in PAPEIS_CONTINUOS else Animation.LOOP_NONE
-		)
-
-## QUANTO TEMPO UM PAPEL OCUPA DE VERDADE, na velocidade em que vai ser
-## tocado. É isto, e não uma tabela, que diz quando o lutador pode voltar
-## à guarda sem cortar o próprio gesto.
-func _duracao(papel: String, velocidade := 1.0) -> float:
-	var padrao := float(DURACAO_PADRAO.get(papel, 1.25))
-	if _animador == null or not _animacoes.has(papel):
-		return padrao
-	var anim := _animador.get_animation(_animacoes[papel])
-	if anim == null or anim.length <= 0.0:
-		return padrao
-	return anim.length / maxf(velocidade, 0.01)
-
-func _tocar(papel: String, mistura := 0.16, velocidade := 1.0) -> bool:
-	if _animador == null or not _animacoes.has(papel):
-		return false
-	var real: StringName = _animacoes[papel]
-	if _animador.current_animation == str(real) and _animador.is_playing():
-		return true
-	_animador.play(real, mistura, velocidade)
-	return true
+# ====================================================================
+# O QUE O JOGO PEDE
+# ====================================================================
 
 func preparar() -> void:
-	# O CORPO VOLTA INTEIRO AO LUGAR antes de qualquer coisa. Ver
-	# `_guardar_o_repouso`: sem isto, uma rodada encerrada com o adversário
-	# na lona entregaria o próximo jogador um lutador de joelhos dobrados.
-	if _animador != null:
-		_animador.stop()
-	_voltar_ao_repouso()
 	dano = 0.0
 	queda = 0.0
 	_caindo = false
@@ -376,63 +201,48 @@ func preparar() -> void:
 	_recuo = 0.0
 	_tempo_reacao = 0.0
 	_tempo_na_lona = 0.0
+	_clarao = 0.0
 	em_guarda = false
-	if _raiz != null and _repouso.has("__raiz__"):
-		_raiz.transform = _repouso["__raiz__"]
-	_tocar("idle", 0.05)
+	if _corpo != null:
+		_corpo.transform = _descanso
+	_tocar("idle")
 
 func guardar(ativo: bool) -> void:
 	em_guarda = ativo
 	if _caindo:
 		return
-	if ativo:
-		if not _tocar("guard", 0.22):
-			_tocar("idle", 0.22)
-	else:
-		_tocar("idle", 0.22)
+	_tocar("guard" if ativo else "idle")
 
 func bater(forca: float, derruba := false, pontos := -1) -> Dictionary:
 	var f := clampf(forca, 0.0, 1.0)
 	_recuo = 1.0
 	_forca_do_recuo = f
 	# Alternar o lado mantém variedade sem depender de aleatoriedade: duas
-	# máquinas com o mesmo golpe exibem a mesma intensidade e duração.
+	# máquinas com o mesmo golpe exibem a mesma reação.
 	_lado *= -1.0
+	_clarao = 1.0
 	var antes := dano
 	if f > DANO_MINIMO:
 		dano = clampf(dano + f * DANO_POR_GOLPE, 0.0, 1.0)
 	var nocaute := not _caindo and (derruba or (dano >= 1.0 and antes < 1.0))
 	var papel := ""
 	var desdenhou := false
-	var ritmo_da_queda := lerpf(0.92, 1.12, f)
 	if nocaute:
 		papel = "knockout"
 		_caindo = true
 		_levantando = false
 		_tempo_na_lona = 0.0
-		_tempo_levantar = _duracao("get_up", 1.0)
-		_tempo_reacao = TEMPO_NA_LONA + _tempo_levantar
-		# A pose de onde o tombo parte, guardada uma vez. Ver `_aplicar_queda`.
-		if _esqueleto != null and _osso_raiz >= 0:
-			_raiz_antes_do_tombo = Transform3D(
-				Basis(_esqueleto.get_bone_pose_rotation(_osso_raiz)),
-				_esqueleto.get_bone_pose_position(_osso_raiz)
-			)
-		_tocar("knockout", 0.08, ritmo_da_queda)
+		_tempo_reacao = TEMPO_NA_LONA + TEMPO_LEVANTAR
+		_tocar("knockout")
 	elif not _caindo:
 		# A nota é a linguagem do jogador. Abaixo de 6.000 o adversário
-		# entende que o golpe foi fraco e desdenha, mesmo que a calibração
-		# física da máquina tenha registrado algum movimento. Na lona ele
-		# nunca executa esta resposta: um nocaute não pode virar deboche.
+		# entende que o golpe foi fraco e desdenha, mesmo que a
+		# calibração física tenha registrado algum movimento. Na lona ele
+		# nunca faz isso: um nocaute não pode virar deboche.
 		papel = reacao_para_pontos(pontos, f)
 		desdenhou = papel == "taunt_weak" and pontos >= 0 and pontos < 6000
-		# A DURAÇÃO SAI DA ANIMAÇÃO, e já dividida pela velocidade em que
-		# ela será tocada. Uma tabela à mão não teria como acompanhar
-		# essa velocidade — e era por isso que todo gesto era cortado no
-		# meio para voltar à guarda. Ver o cabeçalho.
-		var ritmo := lerpf(0.92, 1.10, f)
-		_tempo_reacao = _duracao(papel, ritmo)
-		_tocar(papel, 0.06, ritmo)
+		_tempo_reacao = float(DURACAO.get(papel, 0.8))
+		_tocar(papel)
 	return {"nocaute": nocaute, "dano": dano, "reacao": papel, "desdenhou": desdenhou}
 
 static func reacao_para_pontos(pontos: int, forca: float) -> String:
@@ -440,7 +250,7 @@ static func reacao_para_pontos(pontos: int, forca: float) -> String:
 		return "taunt_weak"
 	var reacao := reacao_para_forca(forca)
 	# Depois do corte competitivo, no mínimo reconhece o golpe. Isso evita
-	# que uma calibração de velocidade conservadora contradiga os pontos.
+	# que uma calibração conservadora contradiga os pontos na tela.
 	if pontos >= 6000 and reacao == "taunt_weak":
 		return "hit_light"
 	return reacao
@@ -457,150 +267,160 @@ static func reacao_para_forca(forca: float) -> String:
 		return "hit_light"
 	return "taunt_weak"
 
+## O clarão do soco, empurrado pela arena. Ele acende a ilustração
+## inteira por um instante — é o mesmo gesto que o resto da tela faz, e
+## sem ele o corpo continuaria calmo enquanto tudo em volta explode.
+func clarao(valor: float) -> void:
+	_clarao = maxf(_clarao, clampf(valor, 0.0, 1.0))
+
 func atualizar(delta: float) -> void:
+	if _figura == null:
+		return
 	_relogio += delta
+	_tempo_no_papel += delta
 	_recuo = maxf(0.0, _recuo - delta * 2.1)
+	_clarao = maxf(0.0, _clarao - delta * 3.4)
 	_tempo_reacao = maxf(0.0, _tempo_reacao - delta)
+
 	if _caindo:
 		_tempo_na_lona += delta
 		queda = minf(1.0, queda + delta * 2.8)
 		if _tempo_na_lona >= TEMPO_NA_LONA and not _levantando:
 			_levantando = true
-			_tempo_levantar = _duracao("get_up", 1.0)
-			_tocar("get_up", 0.12)
+			_tocar("get_up")
 		if _levantando:
 			# A CÂMERA SOBE NO MESMO COMPASSO EM QUE ELE LEVANTA. Com o
 			# tempo chutado, ela chegava em pé antes ou depois dele.
-			queda = maxf(0.0, 1.0 - (_tempo_na_lona - TEMPO_NA_LONA) / _tempo_levantar)
-		if _tempo_na_lona >= TEMPO_NA_LONA + _tempo_levantar:
+			queda = maxf(0.0, 1.0 - (_tempo_na_lona - TEMPO_NA_LONA) / TEMPO_LEVANTAR)
+		if _tempo_na_lona >= TEMPO_NA_LONA + TEMPO_LEVANTAR:
 			_caindo = false
 			_levantando = false
 			queda = 0.0
 			dano = minf(dano, 0.72)
-			_tocar("guard" if em_guarda else "idle", 0.20)
-	elif _tempo_reacao <= 0.0:
-		_tocar("guard" if em_guarda else "idle", 0.20)
+			_tocar("guard" if em_guarda else "idle")
+	elif _tempo_reacao <= 0.0 and not (_papel in PAPEIS_CONTINUOS):
+		_tocar("guard" if em_guarda else "idle")
 
-	_agrandar_a_cabeca()
-	if _animador == null or _animacoes.is_empty():
-		_pose_fallback()
-	# A QUEDA É A ÚLTIMA COISA, e vale nos dois caminhos: ela multiplica
-	# por cima da pose que a animação (ou o `_pose_fallback`) acabou de
-	# escrever, em vez de disputar com ela.
-	_aplicar_queda()
+	_avancar_o_quadro()
+	_mover_o_corpo()
+	_pintar()
 
-## O NOCAUTE PRECISOU SER FEITO AQUI, PORQUE A ANIMAÇÃO NÃO O FAZ.
-##
-## Medido, osso a osso: durante a animação chamada `knockout`, a cabeça do
-## lutador sai de 1,59 m para 1,63 m de altura e anda DOZE CENTÍMETROS
-## para trás. Ele não cai. Ele se inclina um pouco e volta.
-##
-## E o resto do jogo acreditava na promessa: tocava o som de queda,
-## anunciava NOCAUTE, gritava a torcida, jogava a câmera para a altura da
-## lona e esperava 3,35 s "no chão" antes de mandar levantar — com o
-## boneco em pé o tempo todo. Da plateia, o momento mais importante do
-## jogo era o adversário balançando de leve enquanto a câmera olhava para
-## um pedaço vazio de tapete.
-##
-## Não dá para regravar a animação daqui, e não precisa: o tombo é uma
-## rotação do corpo inteiro em torno dos pés, que é fisicamente o que um
-## nocaute é. O esqueleto continua tocando a animação de queda por cima —
-## braços abrindo, cabeça virando —, e o corpo vai ao chão de verdade.
-##
-## O giro é em torno da ORIGEM do nó raiz, que fica nos pés: 78° para trás
-## levam a cabeça de 1,64 m de altura para 0,34 m, a um metro e meio atrás
-## dos calcanhares. É uma queda de costas, que é como se cai quando se
-## leva um soco de frente.
-## O TOMBO É NO OSSO-RAIZ, E NÃO NO NÓ.
-##
-## A primeira versão girava o nó do personagem, que é o caminho óbvio e
-## está errado: o corpo é uma malha COM ESQUELETO, e girar o nó por fora
-## do esqueleto fez onze das treze superfícies simplesmente sumirem da
-## tela — sobravam as duas botas. Medido e confirmado nos dois sentidos:
-## sem o giro, o corpo inteiro desenha; com ele, só as botas.
-##
-## Girando o OSSO-RAIZ, que é o pai de todos os outros, o tombo passa a
-## ser uma pose de esqueleto como qualquer outra — exatamente o que o
-## motor espera de uma malha com pele, e o mesmo caminho que as animações
-## já usam. O corpo inteiro vai ao chão e continua desenhando.
-const ANGULO_DA_QUEDA_GRAUS := 78.0
-const OSSO_RAIZ := "root"
+# ====================================================================
+# O MOVIMENTO, QUE É O QUE TRANSFORMA NOVE DESENHOS NUM LUTADOR
+# ====================================================================
 
-## O CORPO DEITADO PRECISA SUBIR, NÃO DESCER.
-##
-## Girar em torno dos pés põe a LINHA DO ESQUELETO rente à lona — e o
-## esqueleto é o meio do corpo, não a parte de baixo dele. Com os ossos a
-## doze centímetros do chão e um tronco de vinte de espessura, metade do
-## lutador ficaria DENTRO do tapete. Dezoito centímetros é meia espessura
-## de corpo, e é o que o faz deitar SOBRE a lona.
-const SUBIDA_DA_QUEDA := 0.18
-
-var _osso_raiz := -1
-## A pose do osso-raiz no instante em que o nocaute começou.
-var _raiz_antes_do_tombo := Transform3D()
-
-## A POSE DO TOMBO É ABSOLUTA, E NÃO UM ACRÉSCIMO A CADA QUADRO.
-##
-## A primeira tentativa lia a pose atual e multiplicava o giro nela. Isso
-## funciona enquanto a animação está tocando — ela reescreve a pose antes
-## de cada acréscimo. Mas a animação de nocaute dura 1,93 s e NÃO SE
-## REPETE: quando ela acaba, ninguém mais reescreve a pose, e o mesmo
-## giro passa a ser multiplicado sessenta vezes por segundo em cima de si
-## mesmo. O lutador dava voltas e desaparecia do ringue em meio segundo.
-##
-## Guardando a pose de quando o golpe caiu e escrevendo sempre
-## `tombo(t) × guardada`, o resultado depende só de `t` — pode ser
-## chamado uma vez ou mil, dá no mesmo.
-func _aplicar_queda() -> void:
-	if _esqueleto == null or _osso_raiz < 0 or queda <= 0.001:
+func _tocar(papel: String) -> void:
+	if not PAPEIS.has(papel):
+		papel = "idle"
+	if _papel == papel:
 		return
+	_papel = papel
+	_tempo_no_papel = 0.0
+	_mostrar(0)
+
+## QUAL DESENHO MOSTRAR AGORA.
+##
+## Papéis contínuos (respiração, guarda) trocam de quadro em ciclo, e é
+## essa troca — dois desenhos ligeiramente diferentes alternando devagar
+## — que faz o adversário parecer vivo parado no lugar. Gestos com
+## começo e fim andam UMA vez pela lista e param no último quadro, que é
+## onde a pose termina.
+func _avancar_o_quadro() -> void:
+	var receita: Dictionary = PAPEIS[_papel]
+	var lista: Array = receita["quadros"]
+	if lista.size() <= 1:
+		_mostrar(0)
+		return
+	var ciclo := float(receita.get("ciclo", 0.5))
+	var passo := int(_tempo_no_papel / maxf(ciclo, 0.01))
+	if bool(receita.get("uma_vez", false)) or not (_papel in PAPEIS_CONTINUOS):
+		_mostrar(mini(passo, lista.size() - 1))
+	else:
+		_mostrar(passo % lista.size())
+
+func _mostrar(indice: int) -> void:
+	var lista: Array = PAPEIS[_papel]["quadros"]
+	var nome := StringName(str(lista[clampi(indice, 0, lista.size() - 1)]))
+	if _figura.animation != nome and _frames != null and _frames.has_animation(nome):
+		_figura.animation = nome
+
+## O CORPO INTEIRO SE MEXE, e é daqui que vem a sensação de peso.
+##
+## Três coisas somadas, todas em cima da pose parada:
+##
+##   a RESPIRAÇÃO, um balanço de um centímetro e meio que nunca para —
+##   sem ela o desenho denuncia que é um desenho no primeiro segundo;
+##   o RECUO do golpe, que anda para trás, tomba e desliza para o lado
+##   conforme a tabela `RECUO`, e volta com uma curva que sai depressa e
+##   assenta devagar, que é como um corpo que levou um soco se recompõe;
+##   o TOMBO, que desce o corpo até a lona e o inclina, e é a única
+##   coisa aqui que não volta sozinha — ela espera o `get_up`.
+func _mover_o_corpo() -> void:
+	var t := _descanso
+	# respiração
+	var ar := sin(_relogio * 2.1) * 0.014 + sin(_relogio * 0.7) * 0.006
+	t.origin.y += ar
+	t.origin.x += sin(_relogio * 0.43) * 0.012
+
+	# recuo do golpe
+	var receita: Dictionary = RECUO.get(_papel, {})
+	if not receita.is_empty() and _recuo > 0.001:
+		var impacto := ease(_recuo, 0.35)
+		t.origin.z -= float(receita["tras"]) * impacto * (0.55 + _forca_do_recuo * 0.65)
+		t.origin.x += _lado * float(receita["lado"]) * impacto
+		t.basis = t.basis.rotated(Vector3.RIGHT, -float(receita["tombo"]) * impacto)
+		# O cambaleio balança de lado enquanto volta: é o que separa
+		# "levou um soco" de "perdeu a base".
+		if _papel == "stagger":
+			t.origin.x += sin(_tempo_no_papel * 11.0) * 0.06 * impacto
+			t.basis = t.basis.rotated(Vector3.FORWARD, _lado * 0.18 * impacto)
+
+	# O TOMBO — e ele é MENOS do que parece necessário.
+	#
+	# Com um corpo modelado, derrubar exigia girar o corpo inteiro até a
+	# horizontal. Com uma ilustração, o desenho do nocaute JÁ É um corpo
+	# deitado: girá-lo de novo o deitaria duas vezes, e o que aparece é
+	# um cartaz tombando de lado. O que falta ao desenho é só a QUEDA —
+	# o corpo descendo até a lona —, e é só isso que esta conta faz.
+	#
 	# `ease(…, 0.55)` sai depressa e assenta: um corpo que cai ganha
-	# velocidade e para de uma vez quando encontra a lona.
-	var t := ease(clampf(queda, 0.0, 1.0), 0.55)
-	var tombo := Quaternion(Vector3.RIGHT, -deg_to_rad(ANGULO_DA_QUEDA_GRAUS) * t) \
-		* Quaternion(Vector3.FORWARD, _lado * 0.20 * t)
-	_esqueleto.set_bone_pose_rotation(
-		_osso_raiz, tombo * _raiz_antes_do_tombo.basis.get_rotation_quaternion()
-	)
-	_esqueleto.set_bone_pose_position(
-		_osso_raiz, _raiz_antes_do_tombo.origin + Vector3(0.0, SUBIDA_DA_QUEDA * t, 0.0)
-	)
+	# velocidade e para de uma vez quando encontra o tapete.
+	if queda > 0.001:
+		var q := ease(clampf(queda, 0.0, 1.0), 0.55)
+		t.origin.y -= 0.34 * q
+		# Um repique curtíssimo no fim da descida: o corpo bate, sobe um
+		# centímetro e assenta. É o detalhe que separa "caiu" de
+		# "desapareceu para baixo".
+		t.origin.y += sin(clampf((queda - 0.82) / 0.18, 0.0, 1.0) * PI) * 0.035
+	_corpo.transform = t
 
+## A COR DA ILUSTRAÇÃO responde a duas coisas: o clarão do soco, que
+## acende tudo por um instante, e o dano acumulado, que puxa devagar
+## para o vermelho. A segunda é quase imperceptível num golpe e evidente
+## no quinto, que é exatamente o que ela precisa ser.
+func _pintar() -> void:
+	var castigo := clampf(dano, 0.0, 1.0)
+	var cor := Color(1.0, 1.0 - castigo * 0.16, 1.0 - castigo * 0.22)
+	var luz := clampf(_clarao, 0.0, 1.0)
+	_figura.modulate = cor.lerp(Color(2.4, 2.2, 2.2), luz * 0.55)
 
-
-## A CABEÇA É REDIMENSIONADA DEPOIS DA ANIMAÇÃO, todo quadro.
+## QUANTO O CORPO DESCEU EM DIREÇÃO À LONA, de 0 (em pé) a 1 (no chão).
 ##
-## E tem de ser depois: o tocador de animação escreve a pose de cada osso
-## a cada quadro, então um ajuste feito uma vez na montagem seria apagado
-## no primeiro quadro em que o boneco se mexesse. Fazendo aqui, no fim de
-## `atualizar` e portanto depois de o tocador ter escrito, a escala vale
-## em todas as nove animações sem precisar tocar em nenhuma delas.
-func _agrandar_a_cabeca() -> void:
-	if _esqueleto == null:
-		return
-	if _osso_cabeca >= 0:
-		_esqueleto.set_bone_pose_scale(_osso_cabeca, Vector3.ONE * ESCALA_DA_CABECA)
-	for nome in _escultura_indices:
-		_esqueleto.set_bone_pose_scale(_escultura_indices[nome], ESCULTURA[nome])
+## E NÃO "a altura da cabeça", que é o que estava aqui antes e era uma
+## ficção. Num corpo modelado a cabeça tem uma posição no espaço e dá
+## para medi-la; num DESENHO ela não tem — o plano continua em pé e o
+## que muda é a ilustração pintada nele. Inventar uma coordenada para um
+## osso que não existe é o tipo de medida que passa no teste e não
+## corresponde a nada na tela.
+##
+## O que é real, e o que o jogo de fato promete, são duas coisas: o
+## desenho exibido passa a ser o do nocaute, e o corpo desce até o
+## tapete. É isso que esta função devolve.
+func fundura_do_tombo() -> float:
+	if _corpo == null:
+		return 0.0
+	return clampf(-_corpo.position.y / 0.34, 0.0, 1.5)
 
-func _pose_fallback() -> void:
-	if _raiz == null:
-		return
-	# O TOMBO SAIU DAQUI. Ele é de `_aplicar_queda`, que roda logo depois
-	# e vale para os dois caminhos — com animação e sem. Dois lugares
-	# girando o mesmo corpo é como a queda saía com o dobro do ângulo no
-	# modelo sem esqueleto e nenhum no modelo com.
-	var raiz: Transform3D = _repouso.get("__raiz__", _raiz.transform)
-	var impacto := ease(_recuo, 0.35)
-	raiz.origin.z -= impacto * (0.08 + _forca_do_recuo * 0.26)
-	raiz.origin.x += _lado * impacto * 0.06
-	_raiz.transform = raiz
-	_junta("Tronco", Vector3(-impacto * (0.12 + _forca_do_recuo * 0.40), _lado * impacto * 0.16, 0.0))
-	_junta("Cabeca", Vector3(-impacto * (0.22 + _forca_do_recuo * 0.60), _lado * impacto * 0.30, 0.0))
-
-func _junta(nome: String, giro: Vector3) -> void:
-	var no: Node3D = _juntas.get(nome)
-	if no == null:
-		return
-	var base: Transform3D = _repouso[nome]
-	no.transform = Transform3D(base.basis * Basis.from_euler(giro), base.origin)
+## Qual desenho está na tela agora — o contrato que os testes conferem.
+func desenho_atual() -> String:
+	return String(_figura.animation) if _figura != null else ""

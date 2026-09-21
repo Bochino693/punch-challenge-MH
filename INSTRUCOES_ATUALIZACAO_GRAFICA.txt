@@ -1,31 +1,36 @@
-ATUALIZAÇÃO GRÁFICA DO LUTADOR + CORREÇÃO SEM ARDUINO
-=====================================================
+O LUTADOR AGORA E DESENHADO
+===========================
 
-1. Feche o Godot e faça uma cópia da pasta atual do jogo.
-2. Extraia este ZIP diretamente na raiz do projeto.
-3. Autorize a substituição dos arquivos existentes.
-4. Abra o project.godot no Godot 4 e execute o jogo.
+O adversario da arena deixou de ser um corpo montado por codigo e passou
+a ser uma folha de nove ilustracoes:
 
-Não é necessário instalar Python, Blender ou qualquer programa adicional
-no computador que roda o jogo. O lutador continua sendo criado pelo próprio
-Godot e mantém as nove movimentações: idle, guard, provocação, três reações
-de golpe, stagger, knockout e get_up.
+    assets/personagem/sprites/lutador_folha_3x3.png
+    assets/personagem/sprites/lutador_sprite_frames.tres
 
-O que mudou nesta atualização:
-- o personagem agora recebe as luzes 3D reais da arena;
-- material diferencia pele, couro, cabelo e cetim por brilho/rugosidade;
-- contorno mais fino para não achatar a silhueta;
-- peito e abdome menos esféricos, eliminando o aspecto de boneco inflado;
-- geometria e resolução interna maiores, com modo leve automático mantido;
-- efeito de impacto e luzes ciano/magenta preservados;
-- seletor de Arduino refinado, com estado da busca e indicação AUTO;
-- trilhos laterais com LEDs menores, mais próximos e halo mais delicado;
-- jogo continua abrindo e avisando normalmente quando o Arduino não existe.
+O jogo carrega isso sozinho ao subir a arena. Nao ha nada a instalar, nem
+Python, nem Blender, nem passo manual: abrir o projeto no Godot 4 e rodar
+basta.
 
-IMPORTANTE
-O formato GLB não é o problema: ele continua sendo o formato correto para
-um personagem 3D profissional com esqueleto. Este pacote melhora muito o
-personagem procedural que já existe e não adiciona um GLB genérico sem
-rig/animacões, pois isso quebraria os movimentos. Para chegar exatamente a
-um concept art em qualidade de produção será preciso um modelo autoral,
-retopologizado e rigado com as nove animações do jogo.
+O QUE MUDOU
+- o corpo procedural (aneis torneados, musculo modelado, sombreador de
+  desenho) foi APAGADO junto com os dois shaders dele. Ele funcionava e
+  custava onze chamadas de desenho, mas geometria feita de elipsoides
+  somados tem um teto de qualidade, e esse teto fica abaixo de uma
+  ilustracao;
+- o lutador continua DENTRO do mundo 3D, e nao numa camada por cima: o
+  ringue, a perspectiva, o tremor, as particulas, a luz ciano e magenta e
+  a camera que recua no impacto continuam valendo;
+- as nove poses sao desenhos parados. O que as faz mexer e o movimento
+  procedural em scripts/arena/lutador.gd: respiracao, recuo do golpe,
+  cambaleio, tombo, clarao e o tom que escurece conforme o dano;
+- a camera foi reenquadrada duas vezes: de pe ela afastou para a figura
+  caber inteira, e no nocaute ela AFASTA e baixa em vez de aproximar,
+  porque um corpo caido e largo.
+
+TROCAR A ARTE
+Substitua a folha e o .tres mantendo os nove nomes de pose: guarda, idle,
+preparado, jab, direto, impacto_corpo, impacto_forte, nocaute e
+recuperacao. O teste tests/test_arena.gd falha se faltar algum.
+
+CONFERIR
+    godot --headless --path . --script tests/test_arena.gd

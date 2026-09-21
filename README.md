@@ -17,45 +17,23 @@ Central Técnica — com **uma** diferença, na tela do soco:
 > à lona quando não aguenta mais, e tem o estado mostrado nas **colunas
 > de dano** das laterais. A cada soco a máquina grita uma frase.
 
-O lutador **não é um arquivo**: ele é construído pelo próprio jogo, em
-GDScript, quando a arena sobe. Como ele é feito, quanto custa numa TV Box
-e o que os testes guardam: **[`docs/ARENA.md`](docs/ARENA.md)**.
+## O lutador é uma folha de nove poses
 
-## O lutador não depende de nada para existir
+O adversário da arena são **nove ilustrações** em
+`assets/personagem/sprites/`, montadas dentro do mundo 3D — com o
+ringue, a perspectiva, o tremor, as partículas e a câmera do nocaute
+continuando a valer. O que transforma nove desenhos parados num lutador
+que se mexe é o movimento procedural de `scripts/arena/lutador.gd`:
+respiração, recuo do golpe, cambaleio, tombo e o clarão do impacto.
 
-Até a versão anterior o boneco era um `.glb` gerado por um script em
-Python, com um caminho alternativo que passava pelo Blender. Isso custava
-três coisas ao mesmo tempo:
+Antes disso o corpo era construído por código — anéis torneados, músculo
+modelado, sombreador de desenho. Funcionava e custava onze chamadas de
+desenho; hoje custa uma. Mas o motivo de ter saído não foi custo:
+**geometria feita de elipsoides somados tem um teto de qualidade, e esse
+teto fica bem abaixo de uma ilustração.**
 
-* uma **dependência de linguagem** para quem quisesse mexer no
-  personagem — e uma máquina de salão não pode depender de ninguém ter
-  Python ou Blender instalado;
-* um **arquivo que podia faltar**. `embed_pck` faz o `.exe` parecer
-  autossuficiente, e um gabinete entregue sem o modelo dentro mostrava
-  um ringue vazio;
-* um **ciclo de ajuste que saía do Godot**. Cada milímetro de proporção
-  era uma viagem de ida e volta pelo Blender, e foi por isso que o
-  personagem demorou tanto a ficar bom.
-
-Hoje o corpo é código: `scripts/arena/figura.gd` fabrica as formas
-torneadas e `scripts/arena/lutador_nativo.gd` as monta com as proporções
-do personagem. As nove ações também: `scripts/arena/lutador_animacao.gd`
-é a tabela de ângulos de cada gesto, montada em faixas de animação na
-hora. Mudar o V do tronco, a altura da guarda ou a força de um soco
-levado é mudar um número e rodar o jogo.
-
-Em **Central Técnica → Operação**, o quadro do personagem mostra
-**LUTADOR NATIVO • NOVE AÇÕES**.
-
-O repositório original continua sendo a versão de referência: correção de
-sensor, de câmera ou de ranking deve entrar nos dois, e o código fora de
-`scripts/arena/` é igual de propósito para que isso continue possível.
-
----
-
-Máquina de soco da **Lazer & Sport Brinquedos**: jogo em Godot 4 e
-firmware Arduino com sensor óptico LM393. A interrupção do feixe mede o
-tempo de passagem da palheta; o jogo transforma a velocidade em pontuação.
+Como trocar a arte, o que cada pose faz e as duas armadilhas de
+enquadramento que isso trouxe: **[`docs/ARENA.md`](docs/ARENA.md)**.
 
 ## Tela em pé
 
