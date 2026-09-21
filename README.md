@@ -543,6 +543,43 @@ Windows recusa a extensão em silêncio — é a causa número um de
 "funciona no meu PC e não no outro". Confira com `where VCRUNTIME140.dll`
 num terminal da máquina; nada listado quer dizer que falta.
 
+## De que este jogo depende
+
+A resposta curta: para JOGAR, de nada além do próprio executável, da
+pasta que o acompanha e do Windows. Não há linguagem para instalar, nem
+interpretador, nem biblioteca de cálculo. A tabela é a resposta longa.
+
+| o que | onde entra | é preciso instalar? |
+|---|---|---|
+| **Godot 4.6** | o motor; vira o `.exe` na exportação | não — vai embutido |
+| **`gdserial.dll`** | abre a porta COM do Arduino | não — sai na exportação, **ao lado** do `.exe` |
+| **`libcameraserver-extension.windows.dll`** | a webcam, por Media Foundation | não — idem |
+| **Visual C++ 2015-2022 Redistributable (x64)** | as duas DLLs acima dependem dele | **sim, uma vez por máquina** |
+| `reg.exe`, `tasklist.exe`, `pnputil.exe` | diagnóstico da câmera (F9) | não — são do Windows |
+| `powershell.exe` | **só** o plano B da serial, quando a DLL não carrega | não — é do Windows |
+
+**As duas DLLs são o ponto frágil, e sempre pelo mesmo motivo.** O
+`embed_pck` faz o `.exe` parecer autossuficiente, então é natural copiar
+só ele — e aí o Arduino e a câmera somem sem nenhuma mensagem de erro.
+Copie a pasta inteira.
+
+**O PowerShell fica, de propósito.** Ele não é uma dependência no sentido
+que incomoda: já vem no Windows, não se instala, não se atualiza. E ele é
+o plano B da porta serial — quando a `gdserial.dll` não carrega (e no
+gabinete do operador ela NÃO carregou), é o que mantém START, CRÉDITO e o
+sensor vivos em vez de deixar a máquina inteira em "SIMULAÇÃO". Tirá-lo
+seria trocar uma dependência que não custa nada por uma máquina morta na
+noite em que a DLL falhar.
+
+**O que saiu.** Python (o lutador, o banco de áudio inteiro e o ícone),
+NumPy, Blender, o `lutador.glb` e o `camera_windows.ps1` do diagnóstico
+da câmera. Resta um único uso de Python no repositório —
+`tools/conferir_ponte.sh`, um teste de desenvolvimento que roda só em
+Linux e usa Python para abrir um par de pseudo-terminais. Ele não vai
+para a exportação e o jogo nunca o chama; existe porque é o único teste
+que põe o `ponte_serial.ps1` de verdade para conversar com uma porta
+serial de verdade.
+
 ## Refazer o som e o ícone
 
 Nada disso é preciso para JOGAR — os arquivos viajam prontos no

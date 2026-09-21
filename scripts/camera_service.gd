@@ -318,26 +318,18 @@ func ficha_da_ponte() -> String:
 	if _feed == null:
 		return "CAPTURA NATIVA — AGUARDANDO DISPOSITIVO"
 	var nome := str(_feed.get_name()) if _feed.has_method("get_name") else "CÂMERA USB"
-	return "%s • MEDIA FOUNDATION • SEM PYTHON" % nome if OS.get_name() == "Windows" else "%s • CAPTURA NATIVA" % nome
+	return "%s • MEDIA FOUNDATION" % nome if OS.get_name() == "Windows" else "%s • CAPTURA NATIVA" % nome
 
+## NÃO HÁ MAIS INSPETOR PARA DESEMBRULHAR.
+##
+## O diagnóstico da câmera desembrulhava um `.ps1` do pacote para o
+## AppData só para poder chamar o PowerShell em cima dele. Hoje ele
+## pergunta a mesma coisa ao `reg.exe`, ao `tasklist.exe` e ao
+## `pnputil.exe`, que já estão no Windows e não precisam de arquivo
+## nenhum (ver `CameraDoctor`). Esta função continua existindo, devolvendo
+## vazio, porque quem chama o diagnóstico ainda a passa adiante.
 func caminho_do_inspetor() -> String:
-	# Em exportação com PCK embutido, res:// não é um arquivo que o
-	# PowerShell consiga abrir. Materializamos uma cópia local somente para
-	# o diagnóstico; ela não participa da captura de vídeo.
-	var origem := FileAccess.open("res://tools/camera_windows.ps1", FileAccess.READ)
-	if origem == null:
-		return ""
-	var conteudo := origem.get_as_text()
-	origem.close()
-	var pasta := "user://camera_native"
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(pasta))
-	var destino_virtual := pasta + "/camera_windows.ps1"
-	var destino := FileAccess.open(destino_virtual, FileAccess.WRITE)
-	if destino == null:
-		return ""
-	destino.store_string(conteudo)
-	destino.close()
-	return ProjectSettings.globalize_path(destino_virtual)
+	return ""
 
 func idade_do_quadro() -> int:
 	return 999999 if _last_frame_ms <= 0 else Time.get_ticks_msec() - _last_frame_ms
