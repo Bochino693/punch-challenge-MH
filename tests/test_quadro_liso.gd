@@ -44,6 +44,7 @@ func _ok(condicao: bool, o_que: String) -> void:
 func _initialize() -> void:
 	_test_a_leitura_da_porta_nao_segura_o_quadro()
 	_test_a_enumeracao_nao_roda_no_laco_do_jogo()
+	_test_a_extensao_nativa_nao_e_enumerada_em_thread()
 	_test_a_busca_espera_o_golpe_terminar()
 	call_deferred("_test_o_quadro_fica_liso_com_a_placa_muda")
 
@@ -75,6 +76,20 @@ func _test_a_enumeracao_nao_roda_no_laco_do_jogo() -> void:
 		var corpo := fonte.substr(i, 420)
 		_ok("is_alive()" in corpo,
 			"recolher tem de desistir quando a thread ainda está correndo")
+
+## A extensão GdSerial é consultada pela thread principal em `poll_events`.
+## Entregar o mesmo objeto nativo à thread de enumeração cria uma corrida que,
+## no Windows sem Arduino conectado, pode abortar o processo inteiro.
+func _test_a_extensao_nativa_nao_e_enumerada_em_thread() -> void:
+	var fonte := FileAccess.get_file_as_string("res://scripts/main.gd")
+	var i := fonte.find("func _pedir_a_lista")
+	_ok(i >= 0, "precisa existir quem agenda a enumeração das portas")
+	if i >= 0:
+		var corpo := fonte.substr(i, 1200)
+		_ok("SerialLink.CAMINHO_NATIVO" in corpo,
+			"a enumeração em thread precisa excluir a extensão nativa")
+		_ok(corpo.find("SerialLink.CAMINHO_NATIVO") < corpo.find("_thread_portas.start"),
+			"a proteção da extensão nativa precisa vir antes de iniciar a thread")
 
 ## 3) A BUSCA ESPERA O GOLPE TERMINAR — e não para sempre.
 func _test_a_busca_espera_o_golpe_terminar() -> void:

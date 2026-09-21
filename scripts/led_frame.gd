@@ -39,11 +39,11 @@ var cor_resultado := Paleta.AMBAR
 var _flash := 0.0
 var _cor_flash := Paleta.AMBAR
 
-## Espaçamento entre os pontos da moldura, em pixels.
-const PASSO := 52.0
+## Pontos menores e mais próximos formam um trilho contínuo e refinado.
+const PASSO := 38.0
 const MARGEM := 24.0
 ## Quantas lâmpadas a luz corrente deixa acesas atrás dela.
-const CAUDA := 10
+const CAUDA := 14
 
 ## BORDA LISA SÓ ENQUANTO A MÁQUINA TEM FOLGA.
 ##
@@ -184,19 +184,19 @@ func _draw() -> void:
 			acesa *= 0.75 + 0.25 * sin(tempo * 9.0)
 		var p := _ponto_do_percurso(i, total, w, h)
 		var cor := apagada.lerp(base, acesa)
-		var raio := 5.0 + 2.4 * acesa
-		# Halo quente: é o que sobra de "luz" quando o fundo já é claro.
-		draw_circle(p, raio + 7.0, Color(base, acesa * 0.22), true, -1.0, _liso())
+		var raio := 3.2 + 1.25 * acesa
+		# Halo curto: brilho de LED, sem a textura grossa de bulbo.
+		draw_circle(p, raio + 4.0, Color(base, acesa * 0.14), true, -1.0, _liso())
 		draw_circle(p, raio, cor, true, -1.0, _liso())
-		draw_arc(p, raio, 0.0, TAU, 12, Color(Paleta.MARINHO, 0.30 + 0.35 * acesa), 1.6, _liso())
+		draw_arc(p, raio, 0.0, TAU, 16, Color(Paleta.MARINHO, 0.24 + 0.28 * acesa), 0.9, _liso())
 		# Reflexo no vidro do bulbo, sempre no mesmo canto.
-		draw_circle(p + Vector2(-raio * 0.30, -raio * 0.30), raio * 0.26, Color(1, 1, 1, 0.55), true, -1.0, false)
+		draw_circle(p + Vector2(-raio * 0.28, -raio * 0.28), raio * 0.18, Color(1, 1, 1, 0.44), true, -1.0, false)
 
 	if _flash > 0.01:
 		# O clarão acende a fieira inteira de uma vez só.
 		for i in range(total):
 			var p := _ponto_do_percurso(i, total, w, h)
-			draw_circle(p, 9.0, Color(_cor_flash, _flash * 0.85), true, -1.0, true)
+			draw_circle(p, 5.8, Color(_cor_flash, _flash * 0.74), true, -1.0, true)
 		draw_rect(
 			Rect2(MARGEM - 8.0, MARGEM - 8.0, w - 2.0 * (MARGEM - 8.0), h - 2.0 * (MARGEM - 8.0)),
 			Color(_cor_flash, _flash * 0.22), false, 10.0
@@ -239,7 +239,7 @@ func desenhar_apagadas(alvo: CanvasItem) -> void:
 	var detalhe := qualidade > 0.7
 	for i in range(total):
 		var p := _ponto_do_percurso(i, total, w, h)
-		alvo.draw_circle(p, 5.0, apagada, true, -1.0, false)
+		alvo.draw_circle(p, 3.2, apagada, true, -1.0, false)
 		if detalhe:
-			alvo.draw_arc(p, 5.0, 0.0, TAU, 12, Color(Paleta.MARINHO, 0.30), 1.6, false)
-			alvo.draw_circle(p + Vector2(-1.5, -1.5), 1.3, Color(1, 1, 1, 0.55), true, -1.0, false)
+			alvo.draw_arc(p, 3.2, 0.0, TAU, 14, Color(Paleta.MARINHO, 0.26), 0.8, false)
+			alvo.draw_circle(p + Vector2(-0.9, -0.9), 0.55, Color(1, 1, 1, 0.40), true, -1.0, false)

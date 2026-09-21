@@ -31,23 +31,6 @@ window/size/window_width_override=810
 window/size/window_height_override=1440
 window/stretch/mode="canvas_items"
 window/handheld/orientation=1
-; VSYNC ADAPTATIVO (2), E NAO LIGADO (1).
-;
-; Com o vsync simplesmente LIGADO, uma maquina que perde o prazo de um
-; quadro nao passa a rodar a 55 quadros por segundo: ela passa a esperar
-; o vsync SEGUINTE, e alterna 60, 30, 60, 30. O tempo do quadro pula
-; entre 16,7 e 33,3 ms -- o dobro -- e e isso que o olho le como
-; movimento aos solavancos. E o modo de falhar mais comum em PC fraco, e
-; e exatamente o que a maquina do salao encontra.
-;
-; No adaptativo o vsync e respeitado enquanto a maquina da conta e
-; desligado quando ela nao da. Num PC folgado nada muda; num PC apertado
-; o movimento fica continuo, ao preco de um corte de imagem que quase
-; nunca se ve num gabinete em pe a dois metros de distancia. Ver
-; `scripts/ritmo.gd`, que trata o resto da trepidacao.
-;
-; Onde o driver nao souber fazer adaptativo, o Godot cai sozinho para o
-; vsync comum -- entao esta escolha nunca piora nada.
 vsync/vsync_mode=2
 
 [input]
@@ -63,24 +46,13 @@ cabinet_credit={
 ]
 }
 
+[physics]
+
+common/physics_ticks_per_second=20
+
 [punch]
 
 debug_simulation=false
-
-[physics]
-
-; O JOGO NAO TEM FISICA NENHUMA.
-;
-; Nao ha RigidBody, nao ha colisao, nao ha `_physics_process` em lugar
-; algum: o soco vem pela serial e os efeitos andam no `_process`. Mesmo
-; assim o Godot estava rodando sessenta passos de fisica por segundo,
-; cada um com a sua varredura de mundo, so para nao encontrar nada. Num
-; PC fraco isso e tempo tirado do unico laco que importa.
-;
-; Vinte por segundo e o minimo que mantem o motor saudavel sem gastar em
-; conta nenhuma, e libera o processador para fechar o quadro dentro do
-; vsync -- que e, no fim, do que depende o movimento parecer natural.
-common/physics_ticks_per_second=20
 
 [rendering]
 

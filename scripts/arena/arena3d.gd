@@ -30,8 +30,8 @@ extends SubViewport
 ##   • ela só liga nas telas em que aparece. Fica viva do 3–2–1 ao
 ##     resultado e desliga na abertura e na tabela de recordes.
 
-const TAMANHO_CHEIO := Vector2i(576, 645)
-const TAMANHO_MAGRO := Vector2i(384, 430)
+const TAMANHO_CHEIO := Vector2i(640, 717)
+const TAMANHO_MAGRO := Vector2i(448, 502)
 
 ## Cores da arena. O salão é claro no 2D; aqui dentro é escuro de
 ## propósito — o quadro tem de ler como uma JANELA para outro lugar, e
@@ -91,7 +91,7 @@ func _montar_mundo() -> void:
 	env.background_color = COR_FUNDO
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("3a4a6b")
-	env.ambient_light_energy = 0.75
+	env.ambient_light_energy = 0.42
 	ambiente.environment = env
 	_mundo.add_child(ambiente)
 
@@ -108,7 +108,7 @@ func _montar_mundo() -> void:
 	# mesmo que o fundo 2D já desenha caindo sobre o saco.
 	_luz_chave = DirectionalLight3D.new()
 	_luz_chave.name = "Refletor"
-	_luz_chave.light_energy = 1.35
+	_luz_chave.light_energy = 2.10
 	_luz_chave.light_color = Color("fff1d8")
 	_luz_chave.shadow_enabled = false
 	_luz_chave.rotation = Vector3(deg_to_rad(-52.0), deg_to_rad(28.0), 0.0)
@@ -122,7 +122,7 @@ func _montar_mundo() -> void:
 	_rim_quente = OmniLight3D.new()
 	_rim_quente.name = "ContornoVermelho"
 	_rim_quente.light_color = Color("ff1835")
-	_rim_quente.light_energy = 3.2
+	_rim_quente.light_energy = 2.15
 	_rim_quente.omni_range = 7.5
 	_rim_quente.shadow_enabled = false
 	_rim_quente.position = Vector3(-2.1, 1.9, -1.5)
@@ -131,7 +131,7 @@ func _montar_mundo() -> void:
 	_rim_frio = OmniLight3D.new()
 	_rim_frio.name = "ContornoCiano"
 	_rim_frio.light_color = Color("2fd8ff")
-	_rim_frio.light_energy = 3.0
+	_rim_frio.light_energy = 2.00
 	_rim_frio.omni_range = 7.5
 	_rim_frio.shadow_enabled = false
 	_rim_frio.position = Vector3(2.2, 1.8, -1.4)
@@ -581,7 +581,7 @@ func _camera() -> void:
 	# Enquanto ele era liso, folga em volta não custava nada. Agora que
 	# peitoral, abdome, deltoide e panturrilha são relevo de verdade e o
 	# couro da luva tem estouro de luz, mostrar tudo isso a 2,7 m dentro
-	# de uma janela de 576 px é jogar fora o trabalho: a essa distância um
+	# de uma janela de 640 px é jogar fora o trabalho: a essa distância um
 	# músculo tem três pixels. Em 2,30 m a figura ocupa o quadro, e é aí
 	# que a diferença entre um desenho chapado e um corpo aparece.
 	var pos := Vector3(passeio, 1.30 + sin(_relogio * 0.21) * 0.05, 2.30 - _empurrao * 0.24)
@@ -623,10 +623,8 @@ func _camera() -> void:
 	camera.look_at(mira, Vector3.UP)
 
 func _luzes() -> void:
-	# O CLARÃO TAMBÉM ENTRA NA PINTURA. Com `unshaded`, o lutador não
-	# enxerga mais as luzes da cena — se o clarão ficasse só nelas, o
-	# ringue acenderia no soco e o corpo, que é o que levou o golpe,
-	# ficaria igual.
+	# O clarão também entra na emissão do material para continuar nítido
+	# quando a qualidade dinâmica reduzir a resolução durante a pancada.
 	for tinta in _peles:
 		tinta.set_shader_parameter("clarao", _clarao)
 	# O golpe ACENDE a arena por um instante, pelas luzes de contorno. Um
@@ -634,11 +632,11 @@ func _luzes() -> void:
 	# cores e ainda assim diz "explodiu".
 	var extra := _clarao * 6.0
 	if _rim_quente != null:
-		_rim_quente.light_energy = 3.2 + extra
+		_rim_quente.light_energy = 2.15 + extra
 	if _rim_frio != null:
-		_rim_frio.light_energy = 3.0 + extra
+		_rim_frio.light_energy = 2.00 + extra
 	if _luz_chave != null:
-		_luz_chave.light_energy = 1.35 + _clarao * 1.1
+		_luz_chave.light_energy = 2.10 + _clarao * 1.1
 
 func _piscar() -> void:
 	if _flashes == null:

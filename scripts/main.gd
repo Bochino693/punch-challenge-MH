@@ -2430,6 +2430,24 @@ func _portas_cegas() -> PackedStringArray:
 ## teto, e nunca vira desistência.
 ## Manda a thread enumerar, se já passou o tempo e não há outra correndo.
 func _pedir_a_lista() -> void:
+	# A EXTENSÃO NATIVA NÃO PODE SER CHAMADA DE UMA THREAD SECUNDÁRIA.
+	#
+	# `GdSerialManager` também recebe `poll_events()` na thread principal.
+	# Enumerar portas simultaneamente em `_listar_no_fundo` entrega o mesmo
+	# objeto nativo a duas threads. No Windows, quando não existe Arduino (e
+	# principalmente quando não existe porta COM alguma), essa corrida pode
+	# abortar a extensão e fechar o processo inteiro, sem dar ao GDScript a
+	# chance de mostrar um erro.
+	#
+	# A lista nativa já foi obtida uma vez, com segurança, na thread principal
+	# em `_tentar_conectar`. Se ela veio vazia, a varredura cega tenta COM1 a
+	# COM64 e encontra uma placa conectada depois. Portanto não perdemos a
+	# reconexão automática: apenas deixamos de repetir a enumeração insegura.
+	#
+	# A ponte por processo não compartilha um objeto nativo e continua
+	# enumerando no fundo, como antes.
+	if link != null and link.nome_do_caminho() == SerialLink.CAMINHO_NATIVO:
+		return
 	if _thread_portas != null or link == null or not link.available():
 		return
 	if animation_time - _lista_pedida_em < ESPERA_DA_LISTA:
@@ -5247,15 +5265,7 @@ func _central_golpe() -> void:
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
 	_secao(Rect2(80, 1386, 920, 324), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
-	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 1432.0), 7.0, dot, true, -1.0, true)
-	_texto(serial_status, 1438.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
-	_stepper(
-		"porta",
-		porta_configurada if not porta_configurada.is_empty() else "AUTO",
-		"PORTA SERIAL — FIXA" if not porta_configurada.is_empty() else "PORTA SERIAL — AUTOMÁTICA",
-		Paleta.CIANO
-	)
+	_seletor_porta_refinado()
 	var nome_polaridade: String = str({"A":"AUTO", "H":"ALTO", "L":"BAIXO"}.get(sensor_eixo, "AUTO"))
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
 	_texto("POLARIDADE DO BLOQUEIO", 1562.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
@@ -5846,6 +5856,47 @@ func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> v
 	_texto_cabendo(valor, visor.position.y + visor.size.y * 0.68, 30, Paleta.TINTA, visor.size.x - 12.0, visor.position.x + 6.0)
 	var r: Rect2 = PASSOS[chave]
 	_texto(legenda, r.end.y + 28.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
+
+## O seletor do Arduino mostra porta, modo e busca como um único componente.
+## A lógica e as áreas de toque continuam sendo exatamente as do stepper.
+func _seletor_porta_refinado() -> void:
+	var r: Rect2 = PASSOS["porta"]
+	var visor := _passo_visor("porta")
+	var ligado := _sensor_ligado()
+	var procurando := (
+		"PROCURANDO" in serial_status or "CONECTANDO" in serial_status
+		or "AGUARDANDO" in serial_status or "VERIFICANDO" in serial_status
+	)
+	var cor := Paleta.VERDE if ligado else (Paleta.CIANO if procurando else Paleta.AMBAR)
+
+	_cartao(r.grow(7.0), Color("12070d"), Color(cor, 0.42), 1.0, 1.5)
+	draw_rect(Rect2(r.position.x - 7.0, r.position.y + 10.0, 3.0, r.size.y - 20.0), Color(cor, 0.90))
+	_botao(_passo_menos("porta"), "‹", false, cor, 27)
+	_botao(_passo_mais("porta"), "›", false, cor, 27)
+	_cartao(visor, Color("190b12"), Color(cor, 0.22), 1.0, 0.0)
+
+	var centro := Vector2(visor.position.x + 27.0, visor.get_center().y)
+	draw_circle(centro, 5.0, Color(cor, 0.20), true, -1.0, true)
+	draw_circle(centro, 2.4, cor, true, -1.0, true)
+	if procurando:
+		var inicio := fmod(animation_time * 3.2, TAU)
+		draw_arc(centro, 9.0, inicio, inicio + 1.75, 16, Color(cor, 0.82), 1.2, true)
+
+	var porta := porta_configurada if not porta_configurada.is_empty() else "AUTO"
+	_texto_cabendo(porta, visor.position.y + 39.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
+	_texto(
+		"BUSCA AUTOMÁTICA" if porta_configurada.is_empty() else "PORTA PREFERENCIAL",
+		visor.position.y + 55.0, 10, Color(cor, 0.80),
+		HORIZONTAL_ALIGNMENT_CENTER, visor.position.x + 42.0, visor.size.x - 52.0
+	)
+
+	draw_circle(Vector2(126.0, 1431.0), 4.0, cor, true, -1.0, true)
+	_texto_cabendo(serial_status, 1437.0, 14, Paleta.para_texto(cor), 822.0, 140.0)
+	_texto(
+		"O jogo continua aberto e reconecta sozinho",
+		r.end.y + 27.0, 13, Paleta.TINTA_FRACA,
+		HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+	)
 
 ## A RÉGUA DOS OITO NÍVEIS, na largura de cada um.
 ##

@@ -26,7 +26,8 @@ render_mode unshaded, cull_front, depth_draw_opaque, shadows_disabled;
 
 // Em metros. O lutador tem cerca de 1,8 m, então um centímetro e meio é
 // um traço grosso de desenho sem virar uma mancha.
-uniform float espessura = 0.013;
+// Mantém leitura de ilustração sem transformar cada membro em recorte 2D.
+uniform float espessura = 0.006;
 uniform vec4 cor : source_color = vec4(0.05, 0.02, 0.06, 1.0);
 
 // O CONTORNO É PARA A SILHUETA, NÃO PARA O DETALHE.

@@ -393,8 +393,8 @@ static func _musculos_do_tronco(tronco: Node3D) -> void:
 		# A profundidade é o número que mais importa: 0,34 de achatamento
 		# contra 0,46 é a diferença entre uma placa encostada nas
 		# costelas e uma cúpula pendurada nelas.
-		var peito := _peca(tronco, "Peito_" + s, Vector3(lado * 0.078, 0.344, 0.086),
-			Figura.esfera(0.116, Vector3(1.20, 0.34, 0.34)), PELE)
+		var peito := _peca(tronco, "Peito_" + s, Vector3(lado * 0.080, 0.344, 0.077),
+			Figura.esfera(0.116, Vector3(1.24, 0.32, 0.27)), PELE)
 		peito.rotate_z(lado * -0.20)
 		# O DORSAL. A asa que sai debaixo da axila e afina até a cintura:
 		# é ele, e não o peito, que desenha o V visto de frente.
@@ -425,12 +425,12 @@ static func _musculos_do_tronco(tronco: Node3D) -> void:
 	# seis pareçam seis bolinhas iguais coladas.
 	for linha in range(3):
 		var y := 0.150 + float(linha) * 0.060
-		var r := 0.046 - float(linha) * 0.004
+		var r := 0.044 - float(linha) * 0.004
 		var afastamento := 0.034 + float(linha) * 0.005
 		for lado in [-1.0, 1.0]:
 			_peca(tronco, "Abdomen_%d_%s" % [linha, _s(lado)],
-				Vector3(lado * afastamento, y, 0.080),
-				Figura.esfera(r, Vector3(0.92, 0.72, 0.46)), PELE)
+				Vector3(lado * afastamento, y, 0.072),
+				Figura.esfera(r, Vector3(0.94, 0.72, 0.30)), PELE)
 	# E a linha alba: o sulco vertical no meio. É um volume FINO e
 	# recuado, e o que ele faz é dar à oclusão de contato uma fresta para
 	# escurecer bem no meio da barriga.

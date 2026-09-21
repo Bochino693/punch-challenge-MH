@@ -35,8 +35,8 @@ extends RefCounted
 ## Quantos lados tem cada anel. Dezesseis é o ponto em que a silhueta de
 ## um braço deixa de mostrar faceta a um metro da tela; trinta e dois
 ## seria o dobro do custo para uma diferença que ninguém vê num quadro de
-## 576 px de largura.
-const LADOS := 16
+## 640 px de largura. Mais lados eliminam quinas sem novas draw calls.
+const LADOS := 20
 
 ## ------------------------------------------------------------------
 ## O PERFIL DE UM MEMBRO, EM PARES (altura, raio).
@@ -182,7 +182,7 @@ static func _calota(
 ## `escala` deforma a esfera em cada eixo, e é assim que a mesma função
 ## entrega uma cabeça (quase redonda), uma luva (mais funda que alta) e um
 ## peitoral (largo e raso).
-static func esfera(raio: float, escala := Vector3.ONE, paralelos := 10) -> ArrayMesh:
+static func esfera(raio: float, escala := Vector3.ONE, paralelos := 12) -> ArrayMesh:
 	var vertices := PackedVector3Array()
 	var normais := PackedVector3Array()
 	var indices := PackedInt32Array()
