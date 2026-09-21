@@ -40,6 +40,63 @@
 #define PIN_FITA_DIR 6
 #define LEDS_POR_FITA 30
 
+/* ------------------------------------------------------------------
+   MOTOR DO SACO - desce no START e sobe no fim da rodada.
+
+   LIGACAO. Duas saidas digitais comandam uma ponte H (L298N: IN1/IN2;
+   BTS7960: R_EN+RPWM / L_EN+LPWM) ou um par de reles com intertravamento
+   mecanico. NUNCA as duas ao mesmo tempo - ver `motorParar`.
+
+     D7  -> DESCE   (IN1)
+     D8  -> SOBE    (IN2)
+     D10 -> fim de curso DE BAIXO  (para GND, opcional)
+     D11 -> fim de curso DE CIMA   (para GND, opcional)
+
+   POR QUE O CURSO E POR TEMPO. Um motor de saco de pancada nao tem
+   encoder e nao precisa de um: o curso e sempre o mesmo, e cronometrar
+   e a maneira mais simples de garantir que ele PARA. Os fins de curso,
+   quando existem, param antes; o tempo e o teto que vale mesmo se um
+   deles falhar, se o cabo soltar ou se a correia patinar.
+
+   E NAO HA LACO NENHUM AQUI. Nada de while esperando chegar: o estado
+   avanca em `motorAtualizar`, chamada uma vez por volta do `loop`. Um
+   firmware que fica preso esperando um motor e um firmware que para de
+   ler o sensor e de responder ao jogo - e ai ninguem consegue nem
+   mandar parar.
+   ------------------------------------------------------------------ */
+#define PIN_MOTOR_DESCE 7
+#define PIN_MOTOR_SOBE 8
+#define PIN_FIM_BAIXO 10
+#define PIN_FIM_CIMA 11
+
+/* Estados do motor. PARADO e o unico em que as duas saidas estao baixas. */
+#define MOTOR_PARADO 0
+#define MOTOR_DESCENDO 1
+#define MOTOR_SUBINDO 2
+
+/* Onde o saco esta. DESCONHECIDA ate a primeira subida completa: no
+   arranque o firmware nao tem como saber, e fingir que sabe seria pior
+   que admitir. */
+#define POS_DESCONHECIDA 0
+#define POS_EM_CIMA 1
+#define POS_EM_BAIXO 2
+
+uint8_t motorEstado = MOTOR_PARADO;
+uint8_t motorPosicao = POS_DESCONHECIDA;
+unsigned long motorAte = 0;        /* quando o curso atual expira */
+unsigned long motorLiberaEm = 0;   /* pausa obrigatoria antes de inverter */
+uint8_t motorProximo = MOTOR_PARADO; /* o que fazer quando a pausa acabar */
+
+/* Curso em milissegundos, ajustavel pelo jogo, com teto absoluto. O teto
+   existe porque um valor errado vindo do outro lado do cabo nao pode
+   virar um motor ligado para sempre. */
+unsigned long motorCursoMs = 3500;
+const unsigned long MOTOR_CURSO_MAX_MS = 15000;
+/* Tempo morto ao inverter o sentido: protege a ponte H de conducao
+   cruzada e a caixa de reducao do tranco. */
+unsigned long motorPausaMs = 350;
+bool motorUsaFimDeCurso = true;
+
 #if TEM_FITAS
 Adafruit_NeoPixel fitaEsq(LEDS_POR_FITA, PIN_FITA_ESQ, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fitaDir(LEDS_POR_FITA, PIN_FITA_DIR, NEO_GRB + NEO_KHZ800);
@@ -193,14 +250,113 @@ void leds(long permil) {
 #endif
 }
 
+/* ---------------------------------------------------------- o motor */
+
+void motorRelatar() {
+  Serial.print(F("MOTOR,"));
+  Serial.print(motorEstado); Serial.print(',');
+  Serial.print(motorPosicao); Serial.print(',');
+  unsigned long resta = 0;
+  if (motorEstado != MOTOR_PARADO && motorAte > millis()) resta = motorAte - millis();
+  Serial.println(resta);
+}
+
+/* Desliga as duas saidas. E o unico lugar que escreve LOW nas duas, e
+   toda mudanca de estado passa por aqui antes de ligar o outro sentido. */
+void motorParar(bool avisar) {
+  digitalWrite(PIN_MOTOR_DESCE, LOW);
+  digitalWrite(PIN_MOTOR_SOBE, LOW);
+  bool mudou = motorEstado != MOTOR_PARADO;
+  motorEstado = MOTOR_PARADO;
+  motorProximo = MOTOR_PARADO;
+  if (avisar && mudou) motorRelatar();
+}
+
+bool motorFimAtingido(uint8_t sentido) {
+  if (!motorUsaFimDeCurso) return false;
+  if (sentido == MOTOR_DESCENDO) return digitalRead(PIN_FIM_BAIXO) == LOW;
+  if (sentido == MOTOR_SUBINDO) return digitalRead(PIN_FIM_CIMA) == LOW;
+  return false;
+}
+
+/* Comeca um curso. IDEMPOTENTE de proposito: mandar DESCE enquanto ja
+   desce nao reinicia o cronometro, e mandar DESCE com o saco ja embaixo
+   nao faz nada. E o que impede o jogo de manter o motor ligado para
+   sempre a forca de repetir o comando. */
+void motorIr(uint8_t sentido) {
+  if (sentido != MOTOR_DESCENDO && sentido != MOTOR_SUBINDO) { motorParar(true); return; }
+  if (motorEstado == sentido) return;
+  uint8_t destino = (sentido == MOTOR_DESCENDO) ? POS_EM_BAIXO : POS_EM_CIMA;
+  if (motorPosicao == destino) { motorRelatar(); return; }
+  if (motorFimAtingido(sentido)) { motorPosicao = destino; motorRelatar(); return; }
+  /* Inverter exige parar e esperar o tempo morto. */
+  if (motorEstado != MOTOR_PARADO) {
+    motorParar(false);
+    motorProximo = sentido;
+    motorLiberaEm = millis() + motorPausaMs;
+    motorRelatar();
+    return;
+  }
+  if (millis() < motorLiberaEm) { motorProximo = sentido; return; }
+  motorEstado = sentido;
+  motorAte = millis() + motorCursoMs;
+  digitalWrite(PIN_MOTOR_DESCE, sentido == MOTOR_DESCENDO ? HIGH : LOW);
+  digitalWrite(PIN_MOTOR_SOBE, sentido == MOTOR_SUBINDO ? HIGH : LOW);
+  motorRelatar();
+}
+
+/* Uma passada por volta do loop. Sem espera, sem bloqueio. */
+void motorAtualizar() {
+  if (motorEstado == MOTOR_PARADO) {
+    if (motorProximo != MOTOR_PARADO && millis() >= motorLiberaEm) {
+      uint8_t alvo = motorProximo; motorProximo = MOTOR_PARADO; motorIr(alvo);
+    }
+    return;
+  }
+  if (motorFimAtingido(motorEstado)) {
+    motorPosicao = (motorEstado == MOTOR_DESCENDO) ? POS_EM_BAIXO : POS_EM_CIMA;
+    motorParar(false);
+    motorLiberaEm = millis() + motorPausaMs;
+    motorRelatar();
+    return;
+  }
+  if ((long)(millis() - motorAte) >= 0) {
+    /* O tempo acabou: assume que chegou. E o caso normal quando nao ha
+       fim de curso ligado, e a rede de seguranca quando ha. */
+    motorPosicao = (motorEstado == MOTOR_DESCENDO) ? POS_EM_BAIXO : POS_EM_CIMA;
+    motorParar(false);
+    motorLiberaEm = millis() + motorPausaMs;
+    motorRelatar();
+  }
+}
+
+void motorConfigurar(char *cmd) {
+  char *p = strtok(cmd, ","); p = strtok(NULL, ","); /* MOTOR */ p = strtok(NULL, ",");
+  if (p) motorCursoMs = constrain(atol(p), 200L, (long)MOTOR_CURSO_MAX_MS);
+  p = strtok(NULL, ","); if (p) motorPausaMs = constrain(atol(p), 50L, 2000L);
+  p = strtok(NULL, ","); if (p) motorUsaFimDeCurso = atoi(p) != 0;
+  Serial.println(F("OK,MOTOR"));
+  motorRelatar();
+}
+
+void motorComando(char *cmd) {
+  if (!strncasecmp(cmd + 6, "CONFIG", 6)) { motorConfigurar(cmd); return; }
+  if (!strcasecmp(cmd + 6, "DESCE")) motorIr(MOTOR_DESCENDO);
+  else if (!strcasecmp(cmd + 6, "SOBE")) motorIr(MOTOR_SUBINDO);
+  else if (!strcasecmp(cmd + 6, "PARA")) motorParar(true);
+  else if (!strcasecmp(cmd + 6, "ESTADO")) motorRelatar();
+  else Serial.println(F("ERROR,MOTOR"));
+}
+
 void comando(char *cmd) {
   if (!strcasecmp(cmd,"PING")) { Serial.println(F("READY,PUNCH_OPTICAL,V2")); Serial.println(F("PONG")); }
   else if (!strcasecmp(cmd,"ARM")) armarCaptura();
-  else if (!strcasecmp(cmd,"RESET")) { noInterrupts(); capturaArmada=false; pulsoAberto=false; pulsoPendente=false; interrupts(); Serial.println(F("OK,RESET")); }
+  else if (!strcasecmp(cmd,"RESET")) { noInterrupts(); capturaArmada=false; pulsoAberto=false; pulsoPendente=false; interrupts(); motorParar(false); Serial.println(F("OK,RESET")); }
   else if (!strcasecmp(cmd,"CALIBRATE")) { calibrar(); Serial.println(F("OK,CALIBRATE")); }
   else if (!strcasecmp(cmd,"TEST")) { Serial.println(F("HIT,2.600,0.500,7.692,O")); }
   else if (!strncasecmp(cmd,"CONFIG,",7)) configurar(cmd);
   else if (!strncasecmp(cmd,"LEDS,",5)) leds(atol(cmd+5));
+  else if (!strncasecmp(cmd,"MOTOR,",6)) motorComando(cmd);
   else Serial.println(F("ERROR,COMANDO"));
 }
 
@@ -226,6 +382,14 @@ void setup() {
   Serial.begin(115200);
   pinMode(PIN_START,INPUT_PULLUP); pinMode(PIN_CREDIT,INPUT_PULLUP);
   pinMode(PIN_D0,INPUT_PULLUP); pinMode(PIN_A0,INPUT); pinMode(LED_STATUS,OUTPUT);
+  /* O MOTOR NASCE DESLIGADO, e as saidas viram saidas DEPOIS de ja
+     estarem em LOW. Configurar o pino como saida antes de escrever nele
+     deixa um pulso de nivel indefinido na ponte H - curto, mas suficiente
+     para o saco dar um tranco toda vez que a maquina liga. */
+  digitalWrite(PIN_MOTOR_DESCE,LOW); digitalWrite(PIN_MOTOR_SOBE,LOW);
+  pinMode(PIN_MOTOR_DESCE,OUTPUT); pinMode(PIN_MOTOR_SOBE,OUTPUT);
+  digitalWrite(PIN_MOTOR_DESCE,LOW); digitalWrite(PIN_MOTOR_SOBE,LOW);
+  pinMode(PIN_FIM_BAIXO,INPUT_PULLUP); pinMode(PIN_FIM_CIMA,INPUT_PULLUP);
 #if TEM_FITAS
   fitaEsq.begin(); fitaDir.begin(); fitaEsq.setBrightness(140); fitaDir.setBrightness(140);
   fitaEsq.show(); fitaDir.show();
@@ -237,6 +401,6 @@ void setup() {
 }
 
 void loop() {
-  serialReceber(); botoes(); medir();
+  serialReceber(); botoes(); medir(); motorAtualizar();
   if (millis()-ultimaTelemetriaMs >= 250) { ultimaTelemetriaMs=millis(); telemetria(); }
 }

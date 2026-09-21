@@ -18,7 +18,11 @@
 set -e
 raiz=$(dirname "$0")/..
 stub="$raiz/tools/firmware_stub"
-sketch="$raiz/arduino/punch_sensor/punch_sensor.ino"
+# O SKETCH MUDOU DE CASA e este caminho ficou para tras apontando para
+# uma pasta que nao existe mais: o verificador saia com erro de arquivo
+# ausente e ninguem reparou, porque erro de arquivo ausente parece
+# problema de quem chamou e nao do verificador.
+sketch="$raiz/ARDUINO_SENSOR_DE_FEIXE_LM393/ARDUINO_SENSOR_DE_FEIXE_LM393.ino"
 tmp=$(mktemp -d)
 cp "$sketch" "$tmp/sketch.cpp"
 
@@ -28,7 +32,11 @@ cp "$sketch" "$tmp/sketch.cpp"
 # reclamacao, e este verificador chegou a dar FIRMWARE_OK para um sketch
 # que um script meu tinha truncado a zero byte. "Compila" nao quer dizer
 # "existe": sem `setup()` e `loop()` nao ha firmware nenhum.
-for peca in "void setup" "void loop" "processarBotoes" "BUTTON,START" "BUTTON,CREDIT" "OK,MPU"; do
+# As pecas mudaram junto com o firmware: sumiu o MPU, entrou o motor do
+# saco. Um verificador que cobra pecas que o firmware nao tem mais e um
+# verificador que so sabe dizer nao.
+for peca in "void setup" "void loop" "void botoes" "BUTTON,START" "BUTTON,CREDIT" \
+            "void motorAtualizar" "motorParar" "MOTOR_CURSO_MAX_MS"; do
   if ! grep -q "$peca" "$sketch"; then
     echo "FALTA no sketch: $peca"
     exit 1

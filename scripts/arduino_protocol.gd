@@ -133,6 +133,25 @@ static func parse(line: String) -> Dictionary:
 			return {"type": "SATURATION", "source": fonte}
 		"ERROR":
 			return {"type": "ERROR", "code": parts[1].strip_edges().to_upper() if parts.size() > 1 else "DESCONHECIDO"}
+		"MOTOR":
+			# MOTOR,<estado>,<posicao>,<resta_ms>
+			#
+			# O firmware manda esta linha a CADA mudança, e nunca em
+			# repetição: quem a recebe sabe o que o motor está fazendo
+			# sem precisar perguntar. `resta` é quanto falta do curso em
+			# milissegundos, e serve para a Central mostrar uma barra que
+			# anda de verdade em vez de um "aguarde" parado.
+			if parts.size() != 4:
+				return {"type": ""}
+			for i in range(1, 4):
+				if not parts[i].strip_edges().is_valid_int():
+					return {"type": ""}
+			return {
+				"type": "MOTOR",
+				"estado": clampi(parts[1].strip_edges().to_int(), 0, 2),
+				"posicao": clampi(parts[2].strip_edges().to_int(), 0, 2),
+				"resta_ms": maxi(parts[3].strip_edges().to_int(), 0),
+			}
 		"OK":
 			return {"type": "OK", "detail": parts[1].strip_edges().to_upper() if parts.size() > 1 else ""}
 	return {"type": ""}
@@ -221,3 +240,46 @@ static func build_config(
 ## pendurada do lado.
 static func build_leds(fracao: float) -> String:
 	return "LEDS,%d" % clampi(int(round(clampf(fracao, 0.0, 1.0) * 1000.0)), 0, 1000)
+
+
+# ====================================================================
+# O MOTOR DO SACO
+# ====================================================================
+
+## Os três estados que o firmware relata, e os três lugares onde o saco
+## pode estar. Os números são o protocolo; os nomes são para gente.
+const MOTOR_PARADO := 0
+const MOTOR_DESCENDO := 1
+const MOTOR_SUBINDO := 2
+const POS_DESCONHECIDA := 0
+const POS_EM_CIMA := 1
+const POS_EM_BAIXO := 2
+
+static func nome_do_estado(estado: int) -> String:
+	match estado:
+		MOTOR_DESCENDO: return "DESCENDO"
+		MOTOR_SUBINDO: return "SUBINDO"
+		_: return "PARADO"
+
+static func nome_da_posicao(posicao: int) -> String:
+	match posicao:
+		POS_EM_CIMA: return "EM CIMA"
+		POS_EM_BAIXO: return "EM BAIXO"
+		_: return "POSIÇÃO DESCONHECIDA"
+
+## `sentido` é "DESCE", "SOBE" ou "PARA". Qualquer outra coisa vira
+## "PARA": num comando que liga um motor, o padrão seguro é desligar.
+static func build_motor(sentido: String) -> String:
+	var s := sentido.strip_edges().to_upper()
+	if s != "DESCE" and s != "SOBE" and s != "ESTADO":
+		s = "PARA"
+	return "MOTOR,%s" % s
+
+## O curso em milissegundos, a pausa de inversão e se há fim de curso
+## ligado. Os limites são os MESMOS do firmware, de propósito: um valor
+## que o jogo aceita e a placa recusa vira uma configuração que parece
+## ter sido gravada e não foi.
+static func build_motor_config(curso_ms: int, pausa_ms: int, fim_de_curso: bool) -> String:
+	return "MOTOR,CONFIG,%d,%d,%d" % [
+		clampi(curso_ms, 200, 15000), clampi(pausa_ms, 50, 2000), 1 if fim_de_curso else 0
+	]

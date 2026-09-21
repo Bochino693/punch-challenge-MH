@@ -315,6 +315,15 @@ const SOCOS_POR_RODADA := 2
 ## primeiro golpe. A nota já conquistada vale, mas a máquina não rearma
 ## uma segunda tentativa impossível.
 var rodada_encerrada_antecipadamente := false
+
+## ------------------------------------------------------------------
+## O MOTOR QUE BAIXA E LEVANTA O SACO.
+##
+## O jogo nunca liga o motor: ele diz ONDE o saco deve estar, e
+## `SacoMotor` cuida do resto — sem esperar, sem repetir e desistindo
+## quando a placa não responde. Ver `scripts/saco_motor.gd`, que é curto
+## de propósito: tudo o que pode ligar um motor cabe numa página.
+var saco := SacoMotor.new()
 ## QUANTO O RESULTADO DE UM SOCO FICA À VISTA ANTES DE PEDIR O PRÓXIMO.
 ##
 ## Contado a partir do VEREDITO, não do golpe: o placar já subiu e o nome
@@ -1241,6 +1250,11 @@ func _armar_proximo_soco() -> void:
 ## sozinho: dois socos da mesma pessoa disputavam duas linhas da tabela,
 ## e a estatística contava duas partidas onde houve uma.
 func _fechar_rodada() -> void:
+	# E O SACO SOBE. A rodada acabou: os dois socos foram dados (ou a
+	# rodada foi encerrada), e daqui em diante a tela é placar e ranking.
+	# Subir agora deixa o motor terminar o curso enquanto o jogador lê a
+	# nota, em vez de fazer a próxima pessoa esperar por ele.
+	saco.quero(SacoMotor.Onde.EM_CIMA)
 	var melhor := 0
 	var melhor_v := 0.0
 	var simulado := false
@@ -1721,6 +1735,11 @@ func _iniciar_rodada() -> void:
 		credits -= 1
 		credito_gasto = true
 	rodada_encerrada_antecipadamente = false
+	# O SACO DESCE AGORA, no 3-2-1, e não no primeiro soco: o curso leva
+	# três segundos e meio, que é exatamente o tempo da contagem. Quem
+	# está na frente da máquina vê o saco baixando enquanto conta, e o
+	# movimento vira parte da abertura em vez de uma espera.
+	saco.quero(SacoMotor.Onde.EM_BAIXO)
 	_discard_round_photo()
 	intro_active = false
 	sons.stop("score_loop")
@@ -2507,6 +2526,23 @@ func _hora_de_procurar() -> bool:
 		return false
 	return animation_time - _busca_adiada_desde >= TETO_DA_ESPERA_DO_SOCO
 
+## O PASSO DO MOTOR, UMA VEZ POR QUADRO — e quase sempre sem dizer nada.
+##
+## `SacoMotor.passo()` devolve uma linha só quando há de fato algo novo a
+## pedir: o saco não está onde deveria, o pedido ainda vale e já passou o
+## intervalo mínimo desde a última vez. Na esmagadora maioria dos quadros
+## ele devolve vazio e isto custa uma comparação.
+##
+## E ele vem ANTES de tudo o mais no `_poll_serial` de propósito: se a
+## porta cair no meio de um curso, a placa desliga o motor sozinha pelo
+## tempo, e este lado apenas para de pedir.
+func _passo_do_motor() -> void:
+	if link == null or not link.is_open():
+		return
+	var linha := saco.passo()
+	if not linha.is_empty():
+		link.send_line(linha)
+
 func _tentar_conectar() -> void:
 	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
 	#
@@ -2651,6 +2687,7 @@ func _desistir_da_porta(motivo: String) -> void:
 func _poll_serial(_delta: float) -> void:
 	if link == null:
 		return
+	_passo_do_motor()
 	# O BATIMENTO VEM ANTES DE QUALQUER PERGUNTA, E É INCONDICIONAL.
 	#
 	# AQUI ESTAVA O DEFEITO QUE MATAVA A MÁQUINA PARA SEMPRE. Estava
@@ -2965,6 +3002,11 @@ func _on_serial_line(line: String) -> void:
 		"PINS":
 			pino_start = bool(msg["start"])
 			pino_credito = bool(msg["credit"])
+		"MOTOR":
+			# A PLACA É QUEM SABE ONDE O SACO ESTÁ. O jogo só pede; quem
+			# conta o curso, lê o fim de curso e desliga o motor é o
+			# firmware — inclusive se este programa fechar no meio.
+			saco.receber(msg)
 		"PONG":
 			if not porta_atual.is_empty() and not serial_status.begins_with("CONECTADO"):
 				serial_status = "CONECTADO %s" % porta_atual
@@ -3265,6 +3307,14 @@ func _enviar_config() -> void:
 		link.send_line(ArduinoProtocol.build_config(
 			sensor_eixo, sensor_raio, hit_min_speed, sensor_pulso_ms, hit_max_speed
 		))
+		# O AJUSTE DO MOTOR VIAJA JUNTO. Ele é do mesmo tipo de coisa que
+		# a largura da palheta: um número que o operador regula uma vez e
+		# a placa precisa conhecer. Mandar junto garante que a placa
+		# nunca fica com um curso antigo depois de uma reconexão.
+		link.send_line(ArduinoProtocol.build_motor_config(
+			saco.curso_ms, saco.pausa_ms, saco.fim_de_curso
+		))
+		link.send_line(ArduinoProtocol.build_motor("ESTADO"))
 
 ## Cada tentativa abre uma janela nova também na placa. Isto elimina estado
 ## residual do retorno da palheta e garante o mesmo caminho para soco 1 e 2.
@@ -3724,6 +3774,7 @@ func _carregar() -> void:
 	if data.is_empty():
 		return
 	game_mode = str(data.get("mode", game_mode))
+	saco.carregar(data.get("saco_motor", {}))
 	credits = int(data.get("credits", credits))
 	plays = int(data.get("plays", plays))
 	# MIGRAÇÃO: instalações antigas guardavam um recorde só. Ele vira a
@@ -3836,6 +3887,7 @@ func _salvar() -> void:
 		"sensor_vmin": sensor_vmin,
 		"sensor_pulso_ms": sensor_pulso_ms,
 		"auto_escala": auto_escala.para_salvar(),
+		"saco_motor": saco.para_salvar(),
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
