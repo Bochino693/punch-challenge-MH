@@ -102,11 +102,21 @@ const PASSOS := {
 	"referencia": Rect2(110, 526, 400, 58),
 	"curva": Rect2(570, 526, 400, 58),
 	"porta": Rect2(110, 1470, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1586, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1566, 400, LADO_BOTAO),
 	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
 	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
+## AS TRÊS MOLDURAS DA PÁGINA DADOS, EM UM LUGAR SÓ.
+##
+## Os retângulos dos botões são `const` e as molduras são desenhadas a
+## cada quadro: sem uma âncora comum, mover uma seção deixava os botões
+## dela para trás — foi assim que o RITMO passou a desenhar as linhas
+## acima da própria moldura.
+const DADOS_DIAG_Y := 600.0
+const DADOS_RITMO_Y := 1194.0
+const DADOS_APAGAR_Y := 1490.0
+
 const BOTOES_SIMPLES := {
 	"fechar": Rect2(920, 140, 68, 64),
 	# --- página OPERAÇÃO
@@ -143,11 +153,11 @@ const BOTOES_SIMPLES := {
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
-	"zerar": Rect2(110, 1358, 207, 60),
-	"zerar_stats": Rect2(327, 1358, 207, 60),
-	"zerar_ranking": Rect2(544, 1358, 207, 60),
-	"reconectar": Rect2(761, 1358, 209, 60),
-	"teto_efeitos": Rect2(680, 1234, 290, 56),
+	"zerar": Rect2(110, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"zerar_stats": Rect2(327, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"zerar_ranking": Rect2(544, DADOS_APAGAR_Y + 70.0, 207, 60),
+	"reconectar": Rect2(761, DADOS_APAGAR_Y + 70.0, 209, 60),
+	"teto_efeitos": Rect2(110, DADOS_RITMO_Y + 196.0, 400, 56),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -5093,6 +5103,15 @@ func _draw_central() -> void:
 	var caixa := Rect2(40, 96, 1000, 1790)
 	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
 	_placa(caixa.grow(-5.0), 19.0, CENTRAL_FUNDO)
+	# A AUDITORIA COMEÇA AQUI, e não antes.
+	#
+	# Tudo o que foi desenhado até esta linha está ATRÁS de um painel
+	# opaco — o letreiro da abertura, o placar, o ringue. Contar aquilo
+	# como "texto que tapa outro texto" seria acusar a tela de um defeito
+	# que ninguém vê: o painel já cobriu. A auditoria mede o que está por
+	# cima dele, que é o que o operador lê.
+	if auditoria_de_layout:
+		auditoria.clear()
 
 	# ---- O MIOLO, deslocado pela rolagem.
 	#
@@ -5349,7 +5368,12 @@ func _central_golpe() -> void:
 	# olho: até que velocidade esta montagem enxerga, e se a régua cabe
 	# dentro disso.
 	var janela := ArduinoProtocol.janela_medivel(sensor_raio, sensor_pulso_ms)
-	var caixa_pulso := Rect2(570, 1586, 400, LADO_BOTAO)
+	# OS DOIS SUBIRAM VINTE PIXELS. A legenda "LARGURA DA PALHETA" e a
+	# frase que confere a janela do sensor estavam na mesma faixa de
+	# altura, uma centrada na coluna da esquerda e a outra na largura
+	# inteira: elas se cruzavam no meio. Subindo o par de visores, a
+	# frase ganha a linha inteira para ela.
+	var caixa_pulso := Rect2(570, 1566, 400, LADO_BOTAO)
 	_cartao(caixa_pulso, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
 	_texto(
 		"%.2f ms" % sensor_pulso_ms, caixa_pulso.position.y + 42.0, 26, Paleta.CIANO,
@@ -5492,10 +5516,14 @@ func _central_camera() -> void:
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
+	# DUAS FRASES, DUAS LINHAS. As duas eram desenhadas na MESMA linha de
+	# base — uma centrada e a outra à esquerda —, então elas se cruzavam
+	# no meio da tela e ninguém conseguia ler nenhuma das duas. É o tipo
+	# de defeito que passa despercebido enquanto as duas estão curtas.
 	_texto(cam_status, 806.0, 16, Paleta.TINTA_FRACA)
 	if camera_service != null:
 		_texto(
-			camera_service.ficha_da_ponte(), 806.0, 16, Paleta.CIANO,
+			camera_service.ficha_da_ponte(), 840.0, 16, Paleta.CIANO,
 			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
 	# ---- o relatório, na tela, e não numa janela que abre atrás do jogo
@@ -5537,13 +5565,18 @@ func _central_camera() -> void:
 			"Captura nativa do Windows por Media Foundation — sem Python e sem OpenCV.",
 			1018.0, 15, Paleta.CIANO
 		)
+		# TRINTA E QUATRO PIXELS ENTRE LINHAS, e não vinte e quatro. O
+		# piso de corpo de letra subiu para 20 quando a tipografia foi
+		# unificada, e estas três linhas continuaram com o espaçamento de
+		# quando o corpo era 15: cada uma invadia a de baixo por oito
+		# pixels, e o texto de ajuda da câmera virou um borrão.
 		_texto(
 			"Conecte a câmera USB: o jogo reconhece, mantém o vídeo ao vivo e só congela a foto.",
-			1042.0, 15, Paleta.TINTA_FRACA
+			1052.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
 			"DIAGNOSTICAR só consulta. RESOLVER ACESSO libera a privacidade do usuário.",
-			1066.0, 15, Paleta.TINTA_FRACA
+			1086.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
 		for i in range(medico.linhas.size()):
@@ -5570,7 +5603,11 @@ func _central_camera() -> void:
 # ------------------------------------------------------------- DADOS
 func _central_dados() -> void:
 	_secao(Rect2(80, 350, 920, 220), "MELHORES DA CASA", Paleta.VERMELHO)
-	_lista_do_ranking(Rect2(110, 410, 860, 42))
+	# O CARTÃO TINHA 42 PX e guardava duas linhas de texto que somam 74.
+	# A nota era desenhada com a linha de base ABAIXO da borda de baixo do
+	# cartão, por cima da colocação — "1º" e "9999" no mesmo pixel nas
+	# cinco células. Medido pela auditoria de layout, não por acaso.
+	_lista_do_ranking(Rect2(110, 410, 860, 74))
 	var resumo := StatisticsStore.summary(statistics)
 	_texto(
 		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
@@ -5588,15 +5625,28 @@ func _central_dados() -> void:
 	# exatamente por que o diagnóstico saía DIFERENTE em cada PC, com a
 	# mesma placa e o mesmo jogo. Quem lê a tela para contar ao telefone
 	# o que está escrito estava lendo duas frases embaralhadas.
-	_secao(Rect2(80, 600, 920, 470), "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
-	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
-	_texto(
-		telemetria if telemetria != "" else "sem telemetria ainda",
-		692.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	_texto(
+	# A CENTRAL DEIXOU DE TRAZER O `y` DE CADA LINHA ESCRITO À MÃO.
+	#
+	# Enquanto trouxe, esta página escondia cinco sobreposições de uma vez
+	# — e a pior delas era invisível para quem só olhava o código: as
+	# quatro linhas do RITMO eram desenhadas em 1152…1242, ACIMA da
+	# moldura que as devia conter (1186). Alguém mexeu na moldura, as
+	# linhas ficaram onde estavam, e a seção passou a escrever por cima da
+	# seção de cima. Nenhuma das duas frases some — elas se misturam, e
+	# qual fica por cima muda com a fonte e a escala da TV. É por isso que
+	# o diagnóstico saía DIFERENTE em cada PC com a mesma placa.
+	#
+	# Agora a linha seguinte nasce da anterior (`_linha`) e a moldura
+	# nasce da contagem (`_altura_da_pilha`). Não sobrou número para
+	# errar, e o teste tests/test_central_legivel.gd mede o resultado.
+	var caixa_diag := Rect2(80, DADOS_DIAG_Y, 920, _altura_da_pilha(15))
+	_secao(caixa_diag, "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
+	_pilha(caixa_diag)
+	_linha(serial_status, 16, Paleta.TINTA_FRACA)
+	_linha(telemetria if telemetria != "" else "sem telemetria ainda", 15, Paleta.TINTA_LEVE)
+	_linha(
 		"Zero Delay:  START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
-		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# APERTE O BOTÃO E OLHE ESTES DOIS NÚMEROS.
 	#
@@ -5606,24 +5656,20 @@ func _central_dados() -> void:
 	# jogo ignorando. Estas duas linhas separam as quatro em dez segundos:
 	# pino que não muda é problema ANTES do firmware, e aí não adianta
 	# mexer em código.
-	_texto(
+	_linha(
 		"pinos agora:  D2 START %s  •  D3 CRÉDITO %s" % [
 			"APERTADO" if pino_start else "solto",
 			"APERTADO" if pino_credito else "solto",
 		],
-		748.0, 17,
-		Paleta.VERDE if (pino_start or pino_credito) else Paleta.TINTA_LEVE,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if (pino_start or pino_credito) else Paleta.TINTA_LEVE
 	)
-	_texto(
+	_linha(
 		"Arduino (D2/D3):  START %d apertos  •  CRÉDITO %d apertos" % [serial_start, serial_credito],
-		776.0, 17,
-		Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE
 	)
-	_texto(
+	_linha(
 		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
-		832.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# POR ONDE O JOGO ESTÁ FALANDO COM A PLACA.
 	#
@@ -5634,59 +5680,47 @@ func _central_dados() -> void:
 	var recado_serial := link.descricao() if tem_serial else "NENHUM"
 	if link != null and not link.motivo_da_falta().is_empty():
 		recado_serial += " — %s" % link.motivo_da_falta()
-	_texto(
+	_linha(
 		"caminho até a placa: %s" % recado_serial,
-		860.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if tem_serial else Paleta.VERMELHO
 	)
 	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
 	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
 	# travar sem sensor — e é justamente essa separação que diz ao técnico
 	# se ele deve olhar o cabo USB ou os fios do I2C.
 	var sensor_online := _sensor_ligado()
-	_texto(
+	_linha(
 		"sensor óptico: %s" % (
 			"PRONTO — sinal atual" if sensor_online
 			else ("SEM SINAL RECENTE — reconectando" if sensor_presente
 			else "NÃO ENCONTRADO — confira D0=D4, A0=A0, VCC e GND")
 		),
-		888.0, 17, Paleta.VERDE if sensor_online else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.VERDE if sensor_online else Paleta.AMBAR
 	)
-	# A TERCEIRA PERGUNTA, QUE FALTAVA: O SENSOR ESTÁ PRONTO PARA ACEITAR?
-	#
-	# "Porta aberta", "placa identificada" e "sensor presente" já eram
-	# estados distintos aqui. Faltava o quarto, e é o que estava matando a
-	# máquina em silêncio: a placa só aceita um soco depois de ver a
-	# montagem PARADA por 200 ms seguidos. Numa montagem que vibra — caixa
-	# de som dentro do gabinete, ventilador, salão cheio — essa autorização
-	# pode nunca acender, e aí nenhum golpe é aceito, nunca, sem nada na
-	# tela dizendo por quê.
-	#
-	# Se esta linha ficar VERMELHA com a máquina parada, é esta a resposta
-	# inteira: recalibre (a calibração mede o ruído desta montagem) ou veja
-	# o que está vibrando.
 	# O NÚMERO QUE RESPONDE "O SENSOR ESTÁ VIVO?" SEM INTERPRETAR NADA.
 	#
 	# Parado, perto de 0,00. Batendo no alvo, passa de 3. Se o MAIOR
 	# nunca sobe quando alguém soca, o problema está antes do jogo — é
 	# sensor ou fio, e nenhuma regulagem aqui resolve.
-	_texto(
+	_linha(
 		"força agora: %.2f g   •   maior já visto: %.2f g   •   conta acima de %.2f g" % [
 			sensor_forca, sensor_forca_maxima, sensor_gatilho
 		],
-		916.0, 17,
-		Paleta.VERDE if sensor_forca_maxima >= sensor_gatilho and sensor_gatilho > 0.0 else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17,
+		Paleta.VERDE if sensor_forca_maxima >= sensor_gatilho and sensor_gatilho > 0.0 else Paleta.AMBAR
 	)
 	# A ÚLTIMA RECUSA, COM OS NÚMEROS DO EVENTO. É o que diz QUAL limiar
 	# está errado nesta montagem, em vez de deixar adivinhar um por vez.
-	if not ultima_recusa.is_empty():
-		_texto(
-			"última recusa: %s" % ultima_recusa,
-			944.0, 15, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-		)
-
+	#
+	# A linha aparece SEMPRE, mesmo sem recusa nenhuma. Aparecer só às
+	# vezes fazia a moldura e todas as linhas abaixo dela subirem e
+	# descerem 34 px sozinhas, na frente do técnico, no instante em que
+	# ele lê — e uma tela que se mexe enquanto se lê é uma tela em que não
+	# se confia.
+	_linha(
+		"última recusa: %s" % (ultima_recusa if not ultima_recusa.is_empty() else "nenhuma nesta sessão"),
+		15, Paleta.AMBAR if not ultima_recusa.is_empty() else Paleta.TINTA_LEVE
+	)
 	# A EXTENSÃO NATIVA CARREGOU? A PERGUNTA QUE FALTAVA, e a que explica
 	# o "funciona no meu PC" inteiro.
 	#
@@ -5703,13 +5737,12 @@ func _central_dados() -> void:
 	# entre "esta máquina está usando o plano B" e "esta máquina está
 	# quebrada".
 	var nativa_ok := ClassDB.class_exists(&"GdSerialManager")
-	_texto(
+	_linha(
 		"extensão nativa: %s" % (
 			"carregada" if nativa_ok
-			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++ 2015-2022"
+			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++"
 		),
-		916.0, 15, Paleta.VERDE if nativa_ok else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.VERDE if nativa_ok else Paleta.AMBAR
 	)
 	# O ANDAMENTO DA BUSCA, EM NÚMEROS.
 	#
@@ -5717,12 +5750,12 @@ func _central_dados() -> void:
 	# procurando ou travada — e essa dúvida sozinha já custou noites de
 	# gabinete. O número da volta subindo é a prova de que a busca está
 	# viva, e é o que se lê ao telefone.
-	_texto(
+	_linha(
 		"busca: volta %d  •  porta %d de %d  •  varredura cega %s" % [
 			_varreduras + 1, _porta_da_vez, _fila_de_portas.size(),
 			"LIGADA" if _cega_liberada else "desligada",
 		],
-		944.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 	# O QUE JÁ DEU ERRADO NESTA SESSÃO. Ponte religando sem parar é cabo
 	# ruim, antivírus ou PowerShell bloqueado; caminho trocando sem parar
@@ -5730,18 +5763,14 @@ func _central_dados() -> void:
 	var religadas_da_ponte := 0
 	if link is PonteProcessoLink:
 		religadas_da_ponte = (link as PonteProcessoLink).religadas()
-	_texto(
-		"ponte religada %d ×  •  caminho trocado %d ×" % [
-			religadas_da_ponte, _trocas_de_caminho
-		],
-		972.0, 15,
-		Paleta.TINTA_LEVE if (religadas_da_ponte + _trocas_de_caminho) < 4 else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	_linha(
+		"ponte religada %d ×  •  caminho trocado %d ×" % [religadas_da_ponte, _trocas_de_caminho],
+		15, Paleta.TINTA_LEVE if (religadas_da_ponte + _trocas_de_caminho) < 4 else Paleta.AMBAR
 	)
 	# A PORTA FIXADA, E QUANTO CRÉDITO AINDA RESTA A ELA. Fixar uma porta
 	# errada era o jeito mais fácil de matar a máquina, e não havia como
 	# ver isso em lugar nenhum.
-	_texto(
+	_linha(
 		"porta escolhida: %s" % (
 			"automática (varre todas)" if porta_configurada.is_empty()
 			else "%s — %d falha(s); %s" % [
@@ -5750,13 +5779,11 @@ func _central_dados() -> void:
 				else "liberada, varrendo todas"
 			]
 		),
-		1000.0, 15,
-		Paleta.TINTA_LEVE if porta_configurada.is_empty() else Paleta.CIANO,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE if porta_configurada.is_empty() else Paleta.CIANO
 	)
-	_texto(
+	_linha(
 		"sistema: %s  •  velocidade %d bauds" % [OS.get_name(), GameDef.SERIAL_BAUD],
-		1028.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		15, Paleta.TINTA_LEVE
 	)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE
@@ -5766,21 +5793,23 @@ func _central_dados() -> void:
 	# outro vídeo, outra TV, outra resolução. Sem número, o conserto vira
 	# palpite. Estas quatro linhas são o número — e é o que se manda para
 	# quem for consertar, em vez de "está travado".
-	_secao(Rect2(80, 1090, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
+	var caixa_ritmo := Rect2(80, DADOS_RITMO_Y, 920, _altura_da_pilha(4) + 76.0)
+	_secao(caixa_ritmo, "RITMO DA MÁQUINA", Paleta.VERDE)
+	_pilha(caixa_ritmo)
 	var fps := desempenho.fps()
 	var cor_fps := Paleta.VERDE if fps >= 55.0 else (Paleta.AMBAR if fps >= 40.0 else Paleta.VERMELHO)
-	_texto(
+	_linha(
 		"%.0f quadros por segundo  •  pior quadro %.1f ms  •  efeitos em %d%%" % [
 			fps, desempenho.pior_ms(), int(round(desempenho.qualidade * 100.0))
 		],
-		1152.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		20, cor_fps
 	)
-	_texto(
+	_linha(
 		"%d chamadas de desenho  •  %d primitivas por quadro" % [
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
 		],
-		1182.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.TINTA_LEVE
 	)
 	# A ESCALA DENUNCIA A TELA DEITADA.
 	#
@@ -5789,17 +5818,16 @@ func _central_dados() -> void:
 	# fica com metade dos pixels e a máquina parece de baixa qualidade
 	# sem nada estar errado no jogo. Escala 1,00 é a TV girada certo.
 	var escala := get_window().get_final_transform().get_scale()
-	var aviso := "" if absf(escala.y - 1.0) < 0.02 else "  ← GIRE A TELA NO WINDOWS PARA 1080x1920"
-	_texto(
+	var aviso := "" if absf(escala.y - 1.0) < 0.02 else "  ← GIRE A TELA PARA 1080x1920"
+	_linha(
 		"janela %dx%d  •  escala %.2f%s" % [
 			DisplayServer.window_get_size().x, DisplayServer.window_get_size().y, escala.y, aviso
 		],
-		1212.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR
 	)
-	_texto(
+	_linha(
 		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
-		1242.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		17, Paleta.CIANO
 	)
 	# O TETO À MÃO, para quando o automático errar. Ele acerta na maioria
 	# das máquinas e erra em duas: num PC que oscila, ficando subindo e
@@ -5810,11 +5838,42 @@ func _central_dados() -> void:
 		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
-	_secao(Rect2(80, 1304, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	_secao(Rect2(80, DADOS_APAGAR_Y, 920, 150), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
 	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
 	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+
+## UMA PILHA DE LINHAS DENTRO DE UMA SEÇÃO DA CENTRAL.
+##
+## Enquanto cada linha trouxe o seu `y` escrito à mão, esta tela escondeu
+## sobreposições que ninguém via lendo o código: duas frases na mesma
+## linha de base desenham UMA POR CIMA DA OUTRA, e qual delas fica por
+## cima muda com a fonte e a escala da TV. O técnico lê duas frases
+## embaralhadas e não tem como desconfiar da tela.
+##
+## Com a pilha, a linha seguinte nasce da anterior e a moldura nasce da
+## contagem. `tests/test_central_legivel.gd` mede o resultado desenhando
+## a Central de verdade e cruzando os retângulos de cada texto.
+const PILHA_PASSO := 34.0    # de uma linha de base à seguinte
+const PILHA_TOPO := 40.0     # do topo da moldura até o título da seção
+const PILHA_RODAPE := 20.0   # da última linha até o fim da moldura
+
+## Altura de uma moldura que vai guardar `linhas` linhas além do título.
+func _altura_da_pilha(linhas: int, extra := 0.0) -> float:
+	return PILHA_TOPO + PILHA_PASSO * float(linhas) + PILHA_RODAPE + extra
+
+var _pilha_y := 0.0
+
+## Abre a pilha no título da seção; a primeira `_linha` cai logo abaixo.
+func _pilha(rect: Rect2) -> void:
+	_pilha_y = rect.position.y + PILHA_TOPO
+
+## Mais uma linha da pilha. Devolve a linha de base usada.
+func _linha(texto: String, tamanho: int, cor: Color) -> float:
+	_pilha_y += PILHA_PASSO
+	_texto(texto, _pilha_y, tamanho, cor, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+	return _pilha_y
 
 ## Os índices achados, em uma linha. Escrito à mão porque um `map` com
 ## lambda aqui não deixa o GDScript inferir o tipo, e tipo inferido é o
@@ -5893,9 +5952,9 @@ func _lista_do_ranking(rect: Rect2) -> void:
 		var cor := _cor_da_posicao(i + 1)
 		var tem := i < ranking.size()
 		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
-		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
+		_texto("%dº" % (i + 1), celula.position.y + 26.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
 		_texto(
-			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
+			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 62.0, 22,
 			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
 			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
 		)
@@ -6251,11 +6310,55 @@ func _icone(nome: String, centro: Vector2, raio: float, cor: Color) -> void:
 ## Todo texto da tela passa por aqui. `y` é a LINHA DE BASE, que é como o
 ## Godot desenha — e é por isso que as bandas do topo do arquivo falam em
 ## linha de base e não em topo de caixa.
+## ------------------------------------------------------------------
+## A AUDITORIA DE LAYOUT.
+##
+## "Nenhum texto pode tapar o outro" não é uma regra que se cumpre
+## olhando: são quatro páginas de Central, dezenas de rótulos, e basta
+## alguém acrescentar uma linha para empurrar outra por baixo de um
+## cartão. Já aconteceu duas vezes neste arquivo, e nas duas o defeito só
+## apareceu numa foto da tela.
+##
+## Ligando esta bandeira, todo texto desenhado registra o RETÂNGULO que
+## ocupa de fato — largura medida na fonte, altura do topo da maiúscula à
+## barriga da minúscula. `tests/test_central_legivel.gd` percorre as
+## páginas, liga isto e falha se dois retângulos se cruzarem.
+##
+## Ela fica DESLIGADA no jogo e não custa nada: uma comparação por texto.
+var auditoria_de_layout := false
+var auditoria: Array[Dictionary] = []
+
+func _anotar_texto(
+	texto: String, y: float, corpo: int, alinhamento: int, x: float, largura: float
+) -> void:
+	if texto.strip_edges().is_empty():
+		return
+	var medida := fonte_texto.get_string_size(texto, alinhamento, largura, corpo)
+	var esquerda := x
+	if alinhamento == HORIZONTAL_ALIGNMENT_CENTER:
+		esquerda = x + (largura - medida.x) * 0.5
+	elif alinhamento == HORIZONTAL_ALIGNMENT_RIGHT:
+		esquerda = x + largura - medida.x
+	# `y` é a LINHA DE BASE, e não o topo: o retângulo sobe pelo ascendente
+	# e desce pelo descendente. Tratar `y` como topo — o erro natural —
+	# daria uma caixa deslocada para baixo por quase um corpo inteiro, e a
+	# auditoria acusaria sobreposições que não existem enquanto deixaria
+	# passar as que existem.
+	var acima := fonte_texto.get_ascent(corpo)
+	var abaixo := fonte_texto.get_descent(corpo)
+	auditoria.append({
+		"rect": Rect2(esquerda, y - acima, medida.x, acima + abaixo),
+		"texto": texto, "corpo": corpo,
+	})
+
 func _texto(
 	texto: String, y: float, tamanho: int, cor: Color,
 	alinhamento := HORIZONTAL_ALIGNMENT_CENTER, x := MARGEM, largura := LARGURA_UTIL
 ) -> void:
-	draw_string(fonte_texto, Vector2(x, y), texto, alinhamento, largura, _corpo(tamanho), cor)
+	var corpo := _corpo(tamanho)
+	if auditoria_de_layout:
+		_anotar_texto(texto, y, corpo, alinhamento, x, largura)
+	draw_string(fonte_texto, Vector2(x, y), texto, alinhamento, largura, corpo, cor)
 
 ## COMPENSAÇÃO DE ALTURA ENTRE AS DUAS LETRAS.
 ##
